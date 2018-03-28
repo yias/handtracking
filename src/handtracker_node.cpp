@@ -6,6 +6,7 @@
 #include "geometry_msgs/Pose.h"
 #include "geometry_msgs/Twist.h"
 #include "geometry_msgs/Quaternion.h"
+#include "handtracker/spper.h"
 
 
 #include <vector>
@@ -19,6 +20,9 @@
 #include <sys/select.h>
 #include <unistd.h>
 #include <termios.h>
+
+#include <math.h>  
+#include "Eigen/Eigen"
 
 
 
@@ -38,33 +42,61 @@ double startTime;
 
 /*-- Variables related to the mocap system --*/
 
+double gain=2;													// velocity gain
+double a=0.2;													// smoothing factor for the velocity
+double a2=0.1;													// smoothing factor for the position 
 
 double lookTW=0.1;	                                            // the timewindow to look back for the average velocity (in seconds)
 double velThreshold=0.018;                                      // velocity threshold for destinguish the motion or no=motion of the hand
 int mocapRate=250;                                              // the sample rate of the motion capture system
 
 unsigned int handCounter=0;                                     // counter for hand-related messages from the mocap system
+
+bool _firsthandPoseReceived=false;
+double handStamp=0;
 std::vector<double> handPosition(3,0);                          // vector for the position of the hand (in)
 std::vector<double> handOrientation(4,0);                       // vector for the orientation of the hand (in quaternions)
 std::vector<double> handVelocity(3,0);                          // vector for the velocity of the hand (in m/s)
 
-unsigned int elbowCounter=0;                                     // counter for elbow-related messages from the mocap system
-std::vector<double> elbowPosition(3,0);                          // vector for the position of the elbow (in)
-std::vector<double> elbowOrientation(4,0);                       // vector for the orientation of the elbow (in quaternions)
-std::vector<double> elbowVelocity(3,0);                          // vector for the velocity of the elbow (in m/s)
+std::vector<double> handPrevPosition(3,0);                          // vector for the position of the hand (in)
+std::vector<double> handPrevOrientation(4,0);                       // vector for the orientation of the hand (in quaternions)
+
+unsigned int elbowCounter=0;                                    // counter for elbow-related messages from the mocap system
+std::vector<double> elbowPosition(3,0);                         // vector for the position of the elbow (in)
+std::vector<double> elbowOrientation(4,0);                      // vector for the orientation of the elbow (in quaternions)
+std::vector<double> elbowVelocity(3,0);                         // vector for the velocity of the elbow (in m/s)
 
 unsigned int shoulderCounter=0;                                 // counter for shoulder-related messages from the mocap system
+
+bool _firstshoulderPoseReceived=false;
+double shoulderStamp=0;
 std::vector<double> shoulderPosition(3,0);						// vector for the position of the shoulder
 std::vector<double> shoulderOrientation(4,0);					// vector for the orientation of the shoulder (in quaternions)
 std::vector<double> shoulderVelocity(3,0);						// vector for the velocity of the shoulder (in m/s)
+
+std::vector<double> shoulderPrevPosition(3,0);						// vector for the position of the shoulder
+std::vector<double> shoulderPrevOrientation(4,0);					// vector for the orientation of the shoulder (in quaternions)
+
+double shdistance=0;
+
+double velUpperBound=0.32;
+
+float speedPer=0;
+
+
+bool _firstRealPoseReceived=false;
+geometry_msgs::Pose _msgRealPose;
+
+Eigen::Vector4f _qd; // Desired end effector quaternion (4x1)
 
 
 
 std::vector<double> mocapTime;                                   // timestamp for the mocap system
 
 std::vector< std::vector<double> > handRelPos;
-std::vector< double > _omegad(3,0); 					// Desired angular velocity [rad/s] (3x1)
+std::vector< double > _omegad(3,0); 								// Desired angular velocity [rad/s] (3x1)
 
+std::vector< double > velpreviousValue(3,0);
 
 
 /*-- functions for the system --*/
@@ -76,19 +108,73 @@ std::vector< double > _omegad(3,0); 					// Desired angular velocity [rad/s] (3x
 
 /*-- Callback functions --*/
 
+void robotListener(const geometry_msgs::Pose::ConstPtr& msg){
+
+	_msgRealPose = *msg;
+
+	if(!_firstRealPoseReceived)
+	{
+		_firstRealPoseReceived = true;
+		_qd << _msgRealPose.orientation.w, _msgRealPose.orientation.x, _msgRealPose.orientation.y, _msgRealPose.orientation.z;
+		
+	}
+
+}
+
 
 void handListener(const geometry_msgs::PoseStamped& mocapmsg){
 
     /*-- Callback function for subscriber of the mocap system --*/
 
-    handPosition[0]=mocapmsg.pose.position.x;
-    handPosition[1]=mocapmsg.pose.position.y;
-    handPosition[2]=mocapmsg.pose.position.z;
 
-    handOrientation[0]=mocapmsg.pose.orientation.x;
-    handOrientation[1]=mocapmsg.pose.orientation.y;
-    handOrientation[2]=mocapmsg.pose.orientation.z;
-    handOrientation[3]=mocapmsg.pose.orientation.w;
+	if(!_firsthandPoseReceived)
+	{
+			_firsthandPoseReceived=true;
+		   	handPosition[0]=mocapmsg.pose.position.x;
+		    handPosition[1]=mocapmsg.pose.position.y;
+		    handPosition[2]=mocapmsg.pose.position.z;
+
+		    handOrientation[0]=mocapmsg.pose.orientation.x;
+		    handOrientation[1]=mocapmsg.pose.orientation.y;
+		    handOrientation[2]=mocapmsg.pose.orientation.z;
+		    handOrientation[3]=mocapmsg.pose.orientation.w;
+
+		    handPrevPosition[0]=mocapmsg.pose.position.x;
+		    handPrevPosition[1]=mocapmsg.pose.position.y;
+		    handPrevPosition[2]=mocapmsg.pose.position.z;
+
+		    handPrevOrientation[0]=mocapmsg.pose.orientation.x;
+		    handPrevOrientation[1]=mocapmsg.pose.orientation.y;
+		    handPrevOrientation[2]=mocapmsg.pose.orientation.z;
+		    handPrevOrientation[3]=mocapmsg.pose.orientation.w;
+		    handStamp=mocapmsg.header.seq;
+		
+	}else{
+		if(mocapmsg.header.seq!=handStamp){
+			handPosition[0]=(1-a2)*handPrevPosition[0]+a2*mocapmsg.pose.position.x;
+		    handPosition[1]=(1-a2)*handPrevPosition[1]+a2*mocapmsg.pose.position.y;
+		    handPosition[2]=(1-a2)*handPrevPosition[2]+a2*mocapmsg.pose.position.z;
+
+		    handOrientation[0]=(1-a2)*handPrevOrientation[0]+a2*mocapmsg.pose.orientation.x;
+		    handOrientation[1]=(1-a2)*handPrevOrientation[1]+a2*mocapmsg.pose.orientation.y;
+		    handOrientation[2]=(1-a2)*handPrevOrientation[2]+a2*mocapmsg.pose.orientation.z;
+		    handOrientation[3]=(1-a2)*handPrevOrientation[3]+a2*mocapmsg.pose.orientation.w;
+
+		    handPrevPosition[0]=handPosition[0];
+		    handPrevPosition[1]=handPosition[1];
+		    handPrevPosition[2]=handPosition[2];
+
+		    handPrevOrientation[0]=handOrientation[0];
+		    handPrevOrientation[1]=handOrientation[1];
+		    handPrevOrientation[2]=handOrientation[2];
+		    handPrevOrientation[3]=handOrientation[3];
+
+		    handStamp=mocapmsg.header.seq;
+
+		}
+	}
+
+    
 
 
     //mocapTime.push_back((ros::Time::now().toSec())-startTime);
@@ -123,15 +209,57 @@ void shoulderListener(const geometry_msgs::PoseStamped& mocapmsg){
 
     /*-- Callback function for subscriber of the mocap system --*/
 
-    shoulderPosition[0]=mocapmsg.pose.position.x;
-    shoulderPosition[1]=mocapmsg.pose.position.y;
-    shoulderPosition[2]=mocapmsg.pose.position.z;
 
-    shoulderOrientation[0]=mocapmsg.pose.orientation.x;
-    shoulderOrientation[1]=mocapmsg.pose.orientation.y;
-    shoulderOrientation[2]=mocapmsg.pose.orientation.z;
-    shoulderOrientation[3]=mocapmsg.pose.orientation.w;
 
+	if(!_firstshoulderPoseReceived)
+		{
+			_firstshoulderPoseReceived=true;
+		   	shoulderPosition[0]=mocapmsg.pose.position.x;
+		    shoulderPosition[1]=mocapmsg.pose.position.y;
+		    shoulderPosition[2]=mocapmsg.pose.position.z;
+
+		    shoulderOrientation[0]=mocapmsg.pose.orientation.x;
+		    shoulderOrientation[1]=mocapmsg.pose.orientation.y;
+		    shoulderOrientation[2]=mocapmsg.pose.orientation.z;
+		    shoulderOrientation[3]=mocapmsg.pose.orientation.w;
+
+		    shoulderPrevPosition[0]=mocapmsg.pose.position.x;
+		    shoulderPrevPosition[1]=mocapmsg.pose.position.y;
+		    shoulderPrevPosition[2]=mocapmsg.pose.position.z;
+
+		    shoulderPrevOrientation[0]=mocapmsg.pose.orientation.x;
+		    shoulderPrevOrientation[1]=mocapmsg.pose.orientation.y;
+		    shoulderPrevOrientation[2]=mocapmsg.pose.orientation.z;
+		    shoulderPrevOrientation[3]=mocapmsg.pose.orientation.w;
+		    shoulderStamp=mocapmsg.header.seq;
+		
+	}else{
+		if(mocapmsg.header.seq!=handStamp){
+			shoulderPosition[0]=(1-a2)*shoulderPrevPosition[0]+a2*mocapmsg.pose.position.x;
+		    shoulderPosition[1]=(1-a2)*shoulderPrevPosition[1]+a2*mocapmsg.pose.position.y;
+		    shoulderPosition[2]=(1-a2)*shoulderPrevPosition[2]+a2*mocapmsg.pose.position.z;
+
+		    shoulderOrientation[0]=(1-a2)*shoulderPrevOrientation[0]+a2*mocapmsg.pose.orientation.x;
+		    shoulderOrientation[1]=(1-a2)*shoulderPrevOrientation[1]+a2*mocapmsg.pose.orientation.y;
+		    shoulderOrientation[2]=(1-a2)*shoulderPrevOrientation[2]+a2*mocapmsg.pose.orientation.z;
+		    shoulderOrientation[3]=(1-a2)*shoulderPrevOrientation[3]+a2*mocapmsg.pose.orientation.w;
+
+		    shoulderPrevPosition[0]=shoulderPosition[0];
+		    shoulderPrevPosition[1]=shoulderPosition[1];
+		    shoulderPrevPosition[2]=shoulderPosition[2];
+
+		    shoulderPrevOrientation[0]=shoulderOrientation[0];
+		    shoulderPrevOrientation[1]=shoulderOrientation[1];
+		    shoulderPrevOrientation[2]=shoulderOrientation[2];
+		    shoulderPrevOrientation[3]=shoulderOrientation[3];
+
+		    shoulderStamp=mocapmsg.header.seq;
+
+		}
+	}
+
+
+ 
 
     // mocapTime.push_back((ros::Time::now().toSec())-startTime);
 
@@ -189,6 +317,39 @@ std::vector<double> handRP(std::vector<double> handPos, std::vector<double> shou
 }
 
 
+std::vector<double> compDesiredVel(std::vector<double> curVel){
+
+	std::vector<double> desVel(3,0);				// the desired velocity of the hand
+
+	double speed=std::sqrt(curVel[0]*curVel[0]+curVel[1]*curVel[1]+curVel[2]*curVel[2]);
+
+	if(!(speed<=velThreshold)){
+
+		if(speed>1){
+			desVel[0]=velpreviousValue[0];
+			desVel[1]=velpreviousValue[1];
+			desVel[2]=velpreviousValue[2];
+
+		}else{
+			desVel[0]=gain*((1-a)*velpreviousValue[0]+a*(velUpperBound*curVel[0]/speed))/2;
+			desVel[1]=gain*((1-a)*velpreviousValue[1]+a*(velUpperBound*curVel[1]/speed))/2;
+			desVel[2]=gain*((1-a)*velpreviousValue[2]+a*(velUpperBound*curVel[2]/speed))/2;
+
+			// speedPer=(std::sqrt(desVel[0]*desVel[0]+desVel[1]*desVel[1]+desVel[2]*desVel[2]))/(2*velUpperBound);
+
+			velpreviousValue[0]=desVel[0];
+			velpreviousValue[1]=desVel[1];
+			velpreviousValue[2]=desVel[2];
+		}
+
+	}
+
+	speedPer=(std::sqrt(desVel[0]*desVel[0]+desVel[1]*desVel[1]+desVel[2]*desVel[2]))/(2*velUpperBound);
+
+	return desVel;
+
+}
+
 
 int main(int argc, char **argv)
 {
@@ -219,13 +380,16 @@ int main(int argc, char **argv)
 	// ros::Subscriber _subRealPose;						// Subscribe to robot current pose
     // ros::Subscriber _subRealTwist;          				// Subscribe to robot current pose
 	
-    ros::Publisher _pubDesiredOrientation=n.advertise<geometry_msgs::Quaternion>("/lwr_test/joint_controllers/passive_ds_command_orient", 1);  				// Publish desired orientation to the topic "/lwr_test/joint_controllers/passive_ds_command_orient"
-    ros::Publisher _pubDesiredTwist=n.advertise<geometry_msgs::Twist>("/lwr_test/joint_controllers/passive_ds_command_vel", 10); 							// Publish desired twist to topic "/lwr/joint_controllers/passive_ds_command_vel"
+    ros::Publisher _pubDesiredOrientation=n.advertise<geometry_msgs::Quaternion>("/lwr/joint_controllers/passive_ds_command_orient", 1);  				// Publish desired orientation to the topic "/lwr_test/joint_controllers/passive_ds_command_orient"
+    ros::Publisher _pubDesiredTwist=n.advertise<geometry_msgs::Twist>("/lwr/joint_controllers/passive_ds_command_vel", 10); 							// Publish desired twist to topic "/lwr/joint_controllers/passive_ds_command_vel"
+
+	ros::Publisher _pubSpeedPer=n.advertise<handtracker::spper>("/lwr/speedPercentage", 10);  				// Publish the percentage of speed with respect to the maximum velocity"
 
     // Messages declaration
     geometry_msgs::Pose _msgRealPose;
     geometry_msgs::Quaternion _msgDesiredOrientation;
 	geometry_msgs::Twist _msgDesiredTwist;
+	handtracker::spper speedMsg;
 
 
     startTime=ros::Time::now().toSec();
@@ -238,6 +402,8 @@ int main(int argc, char **argv)
     double currentTime=0.0;
 
     std::vector<double> currentVel(3,0);
+
+	std::vector<double> desiredVel(3,0);    
 
 
     int count = 0;
@@ -266,14 +432,21 @@ int main(int argc, char **argv)
 
     	if(currentTime-checkTime>=lookTW){
     		currentVel=handRV(handRelPos);
-    		std::cout<<"current vel: " << currentVel[0] << ", " << currentVel[1] << ", " << currentVel[2] << "\n"; 
+    		std::cout<<"current vel: " << currentVel[0] << ", " << currentVel[1] << ", " << currentVel[2] << " sp: " << std::sqrt(currentVel[0]*currentVel[0]+currentVel[1]*currentVel[1]+currentVel[2]*currentVel[2]) << "\n"; 
     		
+
+    		desiredVel=compDesiredVel(currentVel);
+
+    		speedMsg.sPer=speedPer;
+
     		// update checking time
     		checkTime=ros::Time::now().toSec();
 
-    		_msgDesiredTwist.linear.x  = currentVel[0];
-			_msgDesiredTwist.linear.y  = currentVel[1];
-			_msgDesiredTwist.linear.z  = currentVel[2];
+
+
+    		_msgDesiredTwist.linear.x  = desiredVel[0];
+			_msgDesiredTwist.linear.y  = desiredVel[1];
+			_msgDesiredTwist.linear.z  = desiredVel[2];
 			_msgDesiredTwist.angular.x = _omegad[0];
 			_msgDesiredTwist.angular.y = _omegad[1];
 			_msgDesiredTwist.angular.z = _omegad[2];
@@ -281,12 +454,14 @@ int main(int argc, char **argv)
 			_pubDesiredTwist.publish(_msgDesiredTwist);
 
 			// Publish desired orientation
-			// _msgDesiredOrientation.w = _qd(0);
-			// _msgDesiredOrientation.x = _qd(1);
-			// _msgDesiredOrientation.y = _qd(2);
-			// _msgDesiredOrientation.z = _qd(3);
+			_msgDesiredOrientation.w = _qd(0);
+			_msgDesiredOrientation.x = _qd(1);
+			_msgDesiredOrientation.y = _qd(2);
+			_msgDesiredOrientation.z = _qd(3);
 
-			// _pubDesiredOrientation.publish(_msgDesiredOrientation);
+			_pubDesiredOrientation.publish(_msgDesiredOrientation);
+
+			_pubSpeedPer.publish(speedMsg);
 
     		// remove the oldest relative position
     		handRelPos.clear();
