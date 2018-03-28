@@ -58,8 +58,8 @@ std::vector<double> handPosition(3,0);                          // vector for th
 std::vector<double> handOrientation(4,0);                       // vector for the orientation of the hand (in quaternions)
 std::vector<double> handVelocity(3,0);                          // vector for the velocity of the hand (in m/s)
 
-std::vector<double> handPrevPosition(3,0);                          // vector for the position of the hand (in)
-std::vector<double> handPrevOrientation(4,0);                       // vector for the orientation of the hand (in quaternions)
+std::vector<double> handPrevPosition(3,0);                      // vector for the previous position of the hand (in)
+std::vector<double> handPrevOrientation(4,0);                   // vector for the previous orientation of the hand (in quaternions)
 
 unsigned int elbowCounter=0;                                    // counter for elbow-related messages from the mocap system
 std::vector<double> elbowPosition(3,0);                         // vector for the position of the elbow (in)
@@ -74,10 +74,13 @@ std::vector<double> shoulderPosition(3,0);						// vector for the position of th
 std::vector<double> shoulderOrientation(4,0);					// vector for the orientation of the shoulder (in quaternions)
 std::vector<double> shoulderVelocity(3,0);						// vector for the velocity of the shoulder (in m/s)
 
-std::vector<double> shoulderPrevPosition(3,0);						// vector for the position of the shoulder
-std::vector<double> shoulderPrevOrientation(4,0);					// vector for the orientation of the shoulder (in quaternions)
+std::vector<double> shoulderPrevPosition(3,0);					// vector for the previous position of the shoulder
+std::vector<double> shoulderPrevOrientation(4,0);				// vector for the previous orientation of the shoulder (in quaternions)
 
-double shdistance=0;
+bool _firstdistance=false;
+double current_shdistance=0;									// current distance of the hand from the shoulder
+double previous_shdistance=0;									// previous distance of the hand from the shoulder
+float handDirection=0;
 
 double velUpperBound=0.32;
 
@@ -91,7 +94,7 @@ Eigen::Vector4f _qd; // Desired end effector quaternion (4x1)
 
 
 
-std::vector<double> mocapTime;                                   // timestamp for the mocap system
+std::vector<double> mocapTime;                                   	// timestamp for the mocap system
 
 std::vector< std::vector<double> > handRelPos;
 std::vector< double > _omegad(3,0); 								// Desired angular velocity [rad/s] (3x1)
@@ -279,23 +282,40 @@ std::vector<double> handRV(std::vector< std::vector<double> > handrpos){
 
 	// std::cout<<"size of handrpos: " << handrpos.size() <<"\n";
 
-
+	current_shdistance=sqrt(handrpos[0][0]*handrpos[0][0]+handrpos[0][1]*handrpos[0][1]+handrpos[0][2]*handrpos[0][2]);
 
 	for(int i=1;i<(int)handrpos.size();i++){
-
-		// std::cout<<"rpos: " << handrpos[i][0] << ", " << handrpos[i][1] << ", " << handrpos[i][2] << "\n";
 
 		hrv[0]=hrv[0]+((handrpos[i][0]-handrpos[i-1][0])*sRate);
 		hrv[1]=hrv[1]+((handrpos[i][1]-handrpos[i-1][1])*sRate);
 		hrv[2]=hrv[2]+((handrpos[i][2]-handrpos[i-1][2])*sRate);
 
-	}
+		current_shdistance=current_shdistance+sqrt(handrpos[i][0]*handrpos[i][0]+handrpos[i][1]*handrpos[i][1]+handrpos[i][2]*handrpos[i][2]);
 
-	// std::cout<<"accummulative velocity: " << hrv[0] <<", " << hrv[1] << ", " << hrv[2] <<"\n";
+	}
 
 	hrv[0]=hrv[0]/(int)handrpos.size();
 	hrv[1]=hrv[1]/(int)handrpos.size();
 	hrv[2]=hrv[2]/(int)handrpos.size();
+
+	current_shdistance=current_shdistance/(int)handrpos.size();
+
+	if(!(_firstdistance)){
+		previous_shdistance=current_shdistance;
+		handDirection=0;
+	}else{
+		if(current_shdistance>previous_shdistance){
+			handDirection=1;
+		}else{
+			if(current_shdistance<previous_shdistance){
+				handDirection=-1;
+			}else{
+				handDirection=0;
+			}
+		}
+	}
+
+	previous_shdistance=current_shdistance;
 	
 	return hrv;
 }
@@ -303,7 +323,7 @@ std::vector<double> handRV(std::vector< std::vector<double> > handrpos){
 std::vector<double> handRP(std::vector<double> handPos, std::vector<double> shoulderPos){
 
 
-/*-- a function to calculate the velocity of thand with respect to the shoulder --*/
+/*-- a function to calculate the position of the hand with respect to the shoulder --*/
 
 	std::vector<double> hrp(3,0);				// the relative velocity of the hand
 
@@ -311,7 +331,6 @@ std::vector<double> handRP(std::vector<double> handPos, std::vector<double> shou
 	hrp[1]=handPos[1]-shoulderPos[1];
 	hrp[2]=handPos[2]-shoulderPos[2];
 
-	// std::cout<<"hand rel pos: " << hrp[0] << " " << hrp[1] << " " << hrp[2]<<"\n";
 
 	return hrp;
 }
@@ -438,6 +457,7 @@ int main(int argc, char **argv)
     		desiredVel=compDesiredVel(currentVel);
 
     		speedMsg.sPer=speedPer;
+    		speedMsg.dir=handDirection;
 
     		// update checking time
     		checkTime=ros::Time::now().toSec();
