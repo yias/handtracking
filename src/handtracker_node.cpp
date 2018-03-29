@@ -301,6 +301,7 @@ std::vector<double> handRV(std::vector< std::vector<double> > handrpos){
 	current_shdistance=current_shdistance/(int)handrpos.size();
 
 	if(!(_firstdistance)){
+		_firstdistance=true;
 		previous_shdistance=current_shdistance;
 		handDirection=0;
 	}else{

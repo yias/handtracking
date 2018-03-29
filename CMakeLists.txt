@@ -9,7 +9,7 @@ project(handtracker)
 ## is used, also find other catkin packages
 
 find_package(catkin REQUIRED COMPONENTS
-  mathlib
+  #mathlib
   roscpp
   std_msgs
   geometry_msgs
