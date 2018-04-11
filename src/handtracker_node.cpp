@@ -7,12 +7,14 @@
 #include "geometry_msgs/Twist.h"
 #include "geometry_msgs/Quaternion.h"
 #include "handtracker/spper.h"
+#include "mathlib_eigen_conversions.h"
+#include "MotionGenerators/CDDynamics.h"
 
 
 #include <vector>
 #include <string>
 #include <stdio.h>
-#include <iostream>
+
 #include <algorithm>
 
 #include <sys/types.h>
@@ -22,8 +24,12 @@
 #include <termios.h>
 
 #include <math.h>  
-#include "Eigen/Eigen"
+#include <Eigen/Eigen>
+#include <Eigen/Eigen>
+#include <Eigen/Geometry>
+#include <Eigen/Dense>
 
+#include <iostream>
 
 
 
@@ -44,7 +50,7 @@ double startTime;
 
 double gain=2;													// velocity gain
 double a=0.2;													// smoothing factor for the velocity
-double a2=0.1;													// smoothing factor for the position 
+double a2=0.1;													// smoothing factor for the position
 
 double lookTW=0.1;	                                            // the timewindow to look back for the average velocity (in seconds)
 double velThreshold=0.018;                                      // velocity threshold for destinguish the motion or no=motion of the hand
@@ -60,6 +66,13 @@ std::vector<double> handVelocity(3,0);                          // vector for th
 
 std::vector<double> handPrevPosition(3,0);                      // vector for the previous position of the hand (in)
 std::vector<double> handPrevOrientation(4,0);                   // vector for the previous orientation of the hand (in quaternions)
+
+CDDynamics *hand_pos_filter, *hand_real_vel_filter;
+
+Eigen::VectorXd prev_hand_position(3);
+Eigen::VectorXd prev_hand_real_velocity(3);
+
+Eigen::VectorXd hand_velocity_filtered(3);
 
 unsigned int elbowCounter=0;                                    // counter for elbow-related messages from the mocap system
 std::vector<double> elbowPosition(3,0);                         // vector for the position of the elbow (in)
@@ -85,6 +98,9 @@ float handDirection=0;
 double velUpperBound=0.32;
 
 float speedPer=0;
+
+
+
 
 
 bool _firstRealPoseReceived=false;
@@ -129,6 +145,17 @@ void handListener(const geometry_msgs::PoseStamped& mocapmsg){
 
     /*-- Callback function for subscriber of the mocap system --*/
 
+	Eigen::VectorXd human_hand_position_world(3);
+    Eigen::VectorXd human_hand_real_velocity_world(3);
+
+    MathLib::Vector human_hand_position_world_filtered_mathlib;
+    MathLib::Vector human_hand_real_velocity_world_mathlib;
+    MathLib::Vector human_hand_real_velocity_root_filtered_mathlib;
+    MathLib::Vector human_hand_real_acceleration_root_mathlib;
+
+   
+
+
 
 	if(!_firsthandPoseReceived)
 	{
@@ -136,6 +163,22 @@ void handListener(const geometry_msgs::PoseStamped& mocapmsg){
 		   	handPosition[0]=mocapmsg.pose.position.x;
 		    handPosition[1]=mocapmsg.pose.position.y;
 		    handPosition[2]=mocapmsg.pose.position.z;
+
+		    human_hand_position_world(0)=mocapmsg.pose.position.x;
+		    human_hand_position_world(1)=mocapmsg.pose.position.y;
+		    human_hand_position_world(2)=mocapmsg.pose.position.z;
+
+
+	        hand_pos_filter->SetTarget(E2M_v(human_hand_position_world));
+	        hand_pos_filter->Update();
+	        hand_pos_filter->GetState(human_hand_position_world_filtered_mathlib, human_hand_real_velocity_world_mathlib);
+	        human_hand_real_velocity_world = M2E_v(human_hand_real_velocity_world_mathlib);
+
+	        hand_real_vel_filter->SetTarget(E2M_v(human_hand_real_velocity_world));
+	        hand_real_vel_filter->Update();
+	        hand_real_vel_filter->GetState(human_hand_real_velocity_root_filtered_mathlib, human_hand_real_acceleration_root_mathlib);
+	        hand_velocity_filtered = M2E_v(human_hand_real_velocity_root_filtered_mathlib);
+
 
 		    handOrientation[0]=mocapmsg.pose.orientation.x;
 		    handOrientation[1]=mocapmsg.pose.orientation.y;
@@ -150,10 +193,36 @@ void handListener(const geometry_msgs::PoseStamped& mocapmsg){
 		    handPrevOrientation[1]=mocapmsg.pose.orientation.y;
 		    handPrevOrientation[2]=mocapmsg.pose.orientation.z;
 		    handPrevOrientation[3]=mocapmsg.pose.orientation.w;
+
+		    prev_hand_position(0)=mocapmsg.pose.position.x;
+			prev_hand_position(1)=mocapmsg.pose.position.y;		    
+			prev_hand_position(2)=mocapmsg.pose.position.z;
+
+			
+
 		    handStamp=mocapmsg.header.seq;
 		
 	}else{
 		if(mocapmsg.header.seq!=handStamp){
+
+
+			human_hand_position_world(0)=mocapmsg.pose.position.x;
+		    human_hand_position_world(1)=mocapmsg.pose.position.y;
+		    human_hand_position_world(2)=mocapmsg.pose.position.z;
+
+		    
+	        hand_pos_filter->SetTarget(E2M_v(human_hand_position_world));
+	        hand_pos_filter->Update();
+	        hand_pos_filter->GetState(human_hand_position_world_filtered_mathlib, human_hand_real_velocity_world_mathlib);
+	        human_hand_real_velocity_world = M2E_v(human_hand_real_velocity_world_mathlib);
+
+	        hand_real_vel_filter->SetTarget(E2M_v(human_hand_real_velocity_world));
+	        hand_real_vel_filter->Update();
+	        hand_real_vel_filter->GetState(human_hand_real_velocity_root_filtered_mathlib, human_hand_real_acceleration_root_mathlib);
+	        hand_velocity_filtered = M2E_v(human_hand_real_velocity_root_filtered_mathlib);
+
+	        
+
 			handPosition[0]=(1-a2)*handPrevPosition[0]+a2*mocapmsg.pose.position.x;
 		    handPosition[1]=(1-a2)*handPrevPosition[1]+a2*mocapmsg.pose.position.y;
 		    handPosition[2]=(1-a2)*handPrevPosition[2]+a2*mocapmsg.pose.position.z;
@@ -171,6 +240,14 @@ void handListener(const geometry_msgs::PoseStamped& mocapmsg){
 		    handPrevOrientation[1]=handOrientation[1];
 		    handPrevOrientation[2]=handOrientation[2];
 		    handPrevOrientation[3]=handOrientation[3];
+
+		   
+
+		    prev_hand_position(0)=human_hand_position_world_filtered_mathlib(0);
+			prev_hand_position(1)=human_hand_position_world_filtered_mathlib(1);		    
+			prev_hand_position(2)=human_hand_position_world_filtered_mathlib(2);
+
+			
 
 		    handStamp=mocapmsg.header.seq;
 
@@ -364,7 +441,9 @@ std::vector<double> compDesiredVel(std::vector<double> curVel){
 
 	}
 
-	speedPer=(std::sqrt(desVel[0]*desVel[0]+desVel[1]*desVel[1]+desVel[2]*desVel[2]))/(2*velUpperBound);
+	//speedPer=(std::sqrt(desVel[0]*desVel[0]+desVel[1]*desVel[1]+desVel[2]*desVel[2]))/(2*velUpperBound);
+	//speedPer=(std::sqrt(desVel[0]*desVel[0]+desVel[1]*desVel[1]+desVel[2]*desVel[2]))/(2*velUpperBound);
+	speedPer=hand_velocity_filtered.norm()/(velUpperBound);
 
 	return desVel;
 
@@ -373,6 +452,9 @@ std::vector<double> compDesiredVel(std::vector<double> curVel){
 
 int main(int argc, char **argv)
 {
+
+
+
 
 
 
@@ -403,6 +485,8 @@ int main(int argc, char **argv)
     ros::Publisher _pubDesiredOrientation=n.advertise<geometry_msgs::Quaternion>("/lwr/joint_controllers/passive_ds_command_orient", 1);  				// Publish desired orientation to the topic "/lwr_test/joint_controllers/passive_ds_command_orient"
     ros::Publisher _pubDesiredTwist=n.advertise<geometry_msgs::Twist>("/lwr/joint_controllers/passive_ds_command_vel", 10); 							// Publish desired twist to topic "/lwr/joint_controllers/passive_ds_command_vel"
 
+    ros::Publisher _pubVelTester=n.advertise<geometry_msgs::Twist>("/velocity/tester", 10); 
+
 	ros::Publisher _pubSpeedPer=n.advertise<handtracker::spper>("/lwr/speedPercentage", 10);  				// Publish the percentage of speed with respect to the maximum velocity"
 
     // Messages declaration
@@ -410,6 +494,8 @@ int main(int argc, char **argv)
     geometry_msgs::Quaternion _msgDesiredOrientation;
 	geometry_msgs::Twist _msgDesiredTwist;
 	handtracker::spper speedMsg;
+
+	geometry_msgs::Twist _msgVelTester;
 
 
     startTime=ros::Time::now().toSec();
@@ -426,7 +512,40 @@ int main(int argc, char **argv)
 	std::vector<double> desiredVel(3,0);    
 
 
+
+	// set initial position and velocity to zero
+	prev_hand_position(0)=0.0;
+	prev_hand_position(1)=0.0; 
+	prev_hand_position(2)=0.0;
+
+	
+
+	prev_hand_real_velocity(0)=0.0;
+	prev_hand_real_velocity(1)=0.0;
+	prev_hand_real_velocity(2)=0.0;
+
+	// filter parameters
+
+	double wn_filter_position, wn_filter_velocity, wn_filter_c, dt, dim,sample_time;
+    wn_filter_position = 1.0;
+    wn_filter_velocity = 30.0;
+	wn_filter_c = 25.0;
+	dt = (1.0/sRate);
+    dim = 3;
+	sample_time = dt;
+
+	// initialize filters
+	hand_pos_filter = new CDDynamics(dim, sample_time, wn_filter_position);
+
+	hand_real_vel_filter = new CDDynamics(dim, sample_time, wn_filter_velocity);
+
+	hand_pos_filter->SetStateTarget(E2M_v(prev_hand_position), E2M_v(prev_hand_position));
+
+	hand_real_vel_filter->SetStateTarget(E2M_v(prev_hand_real_velocity), E2M_v(prev_hand_real_velocity));
+
     int count = 0;
+
+   
     while (ros::ok())
     {
         
@@ -446,6 +565,7 @@ int main(int argc, char **argv)
 
     	handRelPos.push_back(handRP(handPosition,shoulderPosition));
 
+    	
     	// std::cout<<"size of handRePos: " << (int)handRelPos.size()<<"\n";
 
     	// std::cout<< "time passed: " << currentTime - checkTime<< "\n";
@@ -483,6 +603,15 @@ int main(int argc, char **argv)
 			_pubDesiredOrientation.publish(_msgDesiredOrientation);
 
 			_pubSpeedPer.publish(speedMsg);
+
+			_msgVelTester.linear.x = hand_velocity_filtered(0);
+    		_msgVelTester.linear.y = hand_velocity_filtered(1);
+	    	_msgVelTester.linear.z = hand_velocity_filtered(2);
+			_msgVelTester.angular.x = _omegad[0];
+			_msgVelTester.angular.y = _omegad[1];
+			_msgVelTester.angular.z = _omegad[2];
+
+			_pubVelTester.publish(_msgVelTester);
 
     		// remove the oldest relative position
     		handRelPos.clear();

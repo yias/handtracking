@@ -9,12 +9,14 @@ project(handtracker)
 ## is used, also find other catkin packages
 
 find_package(catkin REQUIRED COMPONENTS
-  #mathlib
+  mathlib
   roscpp
   std_msgs
   geometry_msgs
+  mathlib
   sensor_msgs
   message_generation
+  motion_generators
 )
 
 find_package(Eigen3 REQUIRED)
@@ -113,10 +115,10 @@ generate_messages(
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES handtracker
-#  CATKIN_DEPENDS roscpp std_msgs
-#  DEPENDS system_lib
+  #INCLUDE_DIRS include
+  LIBRARIES handtracker
+  CATKIN_DEPENDS roscpp std_msgs
+  DEPENDS system_lib Eigen3
 )
 
 ###########
@@ -128,6 +130,7 @@ catkin_package(
 # include_directories(include)
 include_directories(
   ${catkin_INCLUDE_DIRS}
+  include
 )
 include_directories(${EIGEN3_INCLUDE_DIR})
 
@@ -161,7 +164,7 @@ include_directories(${EIGEN3_INCLUDE_DIR})
 #   ${catkin_LIBRARIES}
 # )
 
-add_executable(handtracker src/handtracker_node.cpp)
+add_executable(handtracker src/mathlib_eigen_conversions.cpp src/handtracker_node.cpp)
 target_link_libraries(handtracker
   ${catkin_LIBRARIES}
  )
