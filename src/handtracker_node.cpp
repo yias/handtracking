@@ -673,11 +673,11 @@ int main(int argc, char **argv)
     ros::Publisher _pubDesiredOrientation=n.advertise<geometry_msgs::Quaternion>("/lwr/joint_controllers/passive_ds_command_orient", 1);  				// Publish desired orientation to the topic "/lwr_test/joint_controllers/passive_ds_command_orient"
     ros::Publisher _pubDesiredTwist=n.advertise<geometry_msgs::Twist>("/lwr/joint_controllers/passive_ds_command_vel", 10); 							// Publish desired twist to topic "/lwr/joint_controllers/passive_ds_command_vel"
 
-    ros::Publisher _pubVelTester=n.advertise<geometry_msgs::Twist>("/tester/velocity", 10); 
+    ros::Publisher _pubVelTester=n.advertise<geometry_msgs::Twist>("/handtracker/tester/velocity", 10); 
 
-    ros::Publisher _pubPosTester=n.advertise<geometry_msgs::Twist>("/tester/position", 10); 
+    ros::Publisher _pubPosTester=n.advertise<geometry_msgs::Twist>("/handtracker/tester/position", 10); 
 
-	ros::Publisher _pubSpeedPer=n.advertise<handtracker::spper>("/lwr/speedPercentage", 10);  				// Publish the percentage of speed with respect to the maximum velocity"
+	ros::Publisher _pubSpeedPer=n.advertise<handtracker::spper>("/handtracker/speedPercentage", 10);  				// Publish the percentage of speed with respect to the maximum velocity"
 
     // Messages declaration
     geometry_msgs::Pose _msgRealPose;
