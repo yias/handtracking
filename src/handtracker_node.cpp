@@ -103,6 +103,8 @@ Eigen::VectorXd curr_shoulder_velocity_filtered(3);
 
 Eigen::VectorXd curr_hand_rev_position_filtered(3);
 
+Eigen::VectorXd cuur_hand_rev_velocity_filtered(3);
+
 
 
 
@@ -523,13 +525,13 @@ std::vector<double> handRP(std::vector<double> handPos, std::vector<double> shou
 	hand_pos_filter->SetTarget(E2M_v(human_hand_position_world));
 	hand_pos_filter->Update();
 	hand_pos_filter->GetState(human_hand_position_world_filtered_mathlib, human_hand_real_velocity_world_mathlib);
-	human_hand_real_velocity_world = M2E_v(human_hand_real_velocity_world_mathlib);
+	cuur_hand_rev_velocity_filtered = M2E_v(human_hand_real_velocity_world_mathlib);
 	curr_hand_rev_position_filtered=M2E_v(human_hand_position_world_filtered_mathlib);
 
 
-	hrp[0]=human_hand_position_world_filtered_mathlib(0);
-	hrp[1]=human_hand_position_world_filtered_mathlib(1);
-	hrp[2]=human_hand_position_world_filtered_mathlib(2);
+	hrp[0]=curr_hand_rev_position_filtered(0);
+	hrp[1]=curr_hand_rev_position_filtered(1);
+	hrp[2]=curr_hand_rev_position_filtered(2);
 
 	return hrp;
 }
@@ -575,13 +577,28 @@ std::vector<double> compHandRelVel(){
 
 	std::vector<double> curVel(3,0);
 
+
+    MathLib::Vector hand_rel_velocity_mathlib;
+    MathLib::Vector hand_rel_acceleration_mathlib;
+
+
+	// filtering the velocity
+	hand_real_vel_filter->SetTarget(E2M_v(cuur_hand_rev_velocity_filtered));
+	hand_real_vel_filter->Update();
+	hand_real_vel_filter->GetState(hand_rel_velocity_mathlib, hand_rel_acceleration_mathlib);
+	//hand_velocity_filtered = M2E_v(hand_rel_velocity_mathlib);
+
+	curVel[0]=hand_rel_velocity_mathlib(0);
+	curVel[1]=hand_rel_velocity_mathlib(1);
+	curVel[2]=hand_rel_velocity_mathlib(2);
+
 	// curVel[0]=gain*(hand_velocity_filtered(0)-curr_shoulder_velocity_filtered(0));
 	// curVel[1]=gain*(hand_velocity_filtered(1)-curr_shoulder_velocity_filtered(1));
 	// curVel[2]=gain*(hand_velocity_filtered(2)-curr_shoulder_velocity_filtered(2));
 
-	curVel[0]=gain*(hand_velocity_filtered(0)-curr_shoulder_velocity_filtered(0));
-	curVel[1]=gain*(hand_velocity_filtered(1)-curr_shoulder_velocity_filtered(1));
-	curVel[2]=gain*(hand_velocity_filtered(2)-curr_shoulder_velocity_filtered(2));
+	// curVel[0]=gain*(hand_velocity_filtered(0)-curr_shoulder_velocity_filtered(0));
+	// curVel[1]=gain*(hand_velocity_filtered(1)-curr_shoulder_velocity_filtered(1));
+	// curVel[2]=gain*(hand_velocity_filtered(2)-curr_shoulder_velocity_filtered(2));
 
 
 

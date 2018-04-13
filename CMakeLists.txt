@@ -165,9 +165,8 @@ include_directories(${EIGEN3_INCLUDE_DIR})
 # )
 
 add_executable(handtracker src/mathlib_eigen_conversions.cpp src/handtracker_node.cpp)
-target_link_libraries(handtracker
-  ${catkin_LIBRARIES}
- )
+target_link_libraries(handtracker ${catkin_LIBRARIES})
+add_dependencies(handtracker ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 #############
 ## Install ##
