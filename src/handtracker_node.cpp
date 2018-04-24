@@ -24,7 +24,7 @@
 #include <termios.h>
 
 #include <math.h>  
-#include <Eigen/Eigen>
+// #include <Eigen/Eigen>
 #include <Eigen/Eigen>
 #include <Eigen/Geometry>
 #include <Eigen/Dense>
@@ -117,9 +117,11 @@ double velUpperBound=0.4;
 
 float speedPer=0;
 
+bool _firstHandRP=false;
 
 
 
+bool pub_true=false;
 
 bool _firstRealPoseReceived=false;
 geometry_msgs::Pose _msgRealPose;
@@ -153,6 +155,7 @@ void robotListener(const geometry_msgs::Pose::ConstPtr& msg){
 	{
 		_firstRealPoseReceived = true;
 		_qd << _msgRealPose.orientation.w, _msgRealPose.orientation.x, _msgRealPose.orientation.y, _msgRealPose.orientation.z;
+		// std::cerr << _qd.transpose() << std::endl;
 		
 	}
 
@@ -173,52 +176,57 @@ void handListener(const geometry_msgs::PoseStamped& mocapmsg){
 
    
 
-
+    
 
 	if(!_firsthandPoseReceived)
 	{
+			
 			_firsthandPoseReceived=true;
 		   	handPosition[0]=mocapmsg.pose.position.x;
 		    handPosition[1]=mocapmsg.pose.position.y;
 		    handPosition[2]=mocapmsg.pose.position.z;
 
-		    human_hand_position_world(0)=mocapmsg.pose.position.x;
-		    human_hand_position_world(1)=mocapmsg.pose.position.y;
-		    human_hand_position_world(2)=mocapmsg.pose.position.z;
+		    std::cout<<"hand pose: " << handPosition[0] << ", " << handPosition[1] << ", " << handPosition[2] << "\n"; 
 
-		    // filtering the hand position
-	        hand_pos_filter->SetTarget(E2M_v(human_hand_position_world));
-	        hand_pos_filter->Update();
-	        hand_pos_filter->GetState(human_hand_position_world_filtered_mathlib, human_hand_real_velocity_world_mathlib);
+		 //    human_hand_position_world(0)=mocapmsg.pose.position.x;
+		 //    human_hand_position_world(1)=mocapmsg.pose.position.y;
+		 //    human_hand_position_world(2)=mocapmsg.pose.position.z;
 
-	        curr_hand_position_filtered=M2E_v(human_hand_position_world_filtered_mathlib);
+		 //    // filtering the hand position
+	  //       hand_pos_filter->SetTarget(E2M_v(human_hand_position_world));
+	  //       hand_pos_filter->Update();
+	  //       hand_pos_filter->GetState(human_hand_position_world_filtered_mathlib, human_hand_real_velocity_world_mathlib);
 
-
-	        // // filtering the hand velocity
-	        human_hand_real_velocity_world = M2E_v(human_hand_position_world_filtered_mathlib);
-	        hand_real_vel_filter->SetTarget(E2M_v(human_hand_real_velocity_world));
-	        hand_real_vel_filter->Update();
-	        hand_real_vel_filter->GetState(human_hand_real_velocity_root_filtered_mathlib, human_hand_real_acceleration_root_mathlib);
-	        hand_velocity_filtered = M2E_v(human_hand_real_velocity_root_filtered_mathlib);
+	  //       curr_hand_position_filtered=M2E_v(human_hand_position_world_filtered_mathlib);
 
 
-		    handOrientation[0]=mocapmsg.pose.orientation.x;
-		    handOrientation[1]=mocapmsg.pose.orientation.y;
-		    handOrientation[2]=mocapmsg.pose.orientation.z;
-		    handOrientation[3]=mocapmsg.pose.orientation.w;
+	  //       // // filtering the hand velocity
+	  //       human_hand_real_velocity_world = M2E_v(human_hand_position_world_filtered_mathlib);
+	  //       hand_real_vel_filter->SetTarget(E2M_v(human_hand_real_velocity_world));
+	  //       hand_real_vel_filter->Update();
+	  //       hand_real_vel_filter->GetState(human_hand_real_velocity_root_filtered_mathlib, human_hand_real_acceleration_root_mathlib);
+	  //       hand_velocity_filtered = M2E_v(human_hand_real_velocity_root_filtered_mathlib);
 
-		    handPrevPosition[0]=mocapmsg.pose.position.x;
-		    handPrevPosition[1]=mocapmsg.pose.position.y;
-		    handPrevPosition[2]=mocapmsg.pose.position.z;
 
-		    handPrevOrientation[0]=mocapmsg.pose.orientation.x;
-		    handPrevOrientation[1]=mocapmsg.pose.orientation.y;
-		    handPrevOrientation[2]=mocapmsg.pose.orientation.z;
-		    handPrevOrientation[3]=mocapmsg.pose.orientation.w;
+		 //    handOrientation[0]=mocapmsg.pose.orientation.x;
+		 //    handOrientation[1]=mocapmsg.pose.orientation.y;
+		 //    handOrientation[2]=mocapmsg.pose.orientation.z;
+		 //    handOrientation[3]=mocapmsg.pose.orientation.w;
 
-		    prev_hand_position(0)=mocapmsg.pose.position.x;
-			prev_hand_position(1)=mocapmsg.pose.position.y;		    
-			prev_hand_position(2)=mocapmsg.pose.position.z;
+		 //    handPrevPosition[0]=mocapmsg.pose.position.x;
+		 //    handPrevPosition[1]=mocapmsg.pose.position.y;
+		 //    handPrevPosition[2]=mocapmsg.pose.position.z;
+
+		 //    handPrevOrientation[0]=mocapmsg.pose.orientation.x;
+		 //    handPrevOrientation[1]=mocapmsg.pose.orientation.y;
+		 //    handPrevOrientation[2]=mocapmsg.pose.orientation.z;
+		 //    handPrevOrientation[3]=mocapmsg.pose.orientation.w;
+
+		 //    prev_hand_position(0)=mocapmsg.pose.position.x;
+			// prev_hand_position(1)=mocapmsg.pose.position.y;		    
+			// prev_hand_position(2)=mocapmsg.pose.position.z;
+
+			std::cout<<"Initial hand pose received\n";
 
 			
 
@@ -227,30 +235,35 @@ void handListener(const geometry_msgs::PoseStamped& mocapmsg){
 	}else{
 		if(mocapmsg.header.seq!=handStamp){
 
+			
 
 			human_hand_position_world(0)=mocapmsg.pose.position.x;
 		    human_hand_position_world(1)=mocapmsg.pose.position.y;
 		    human_hand_position_world(2)=mocapmsg.pose.position.z;
 
 		    
-		    // filtering the hand position
-	        hand_pos_filter->SetTarget(E2M_v(human_hand_position_world));
-	        hand_pos_filter->Update();
-	        hand_pos_filter->GetState(human_hand_position_world_filtered_mathlib, human_hand_real_velocity_world_mathlib);
-	        human_hand_real_velocity_world = M2E_v(human_hand_real_velocity_world_mathlib);
-	        curr_hand_position_filtered=M2E_v(human_hand_position_world_filtered_mathlib);
+		 //    // filtering the hand position
+	  //       hand_pos_filter->SetTarget(E2M_v(human_hand_position_world));
+	  //       hand_pos_filter->Update();
+	  //       hand_pos_filter->GetState(human_hand_position_world_filtered_mathlib, human_hand_real_velocity_world_mathlib);
+	  //       human_hand_real_velocity_world = M2E_v(human_hand_real_velocity_world_mathlib);
+	  //       curr_hand_position_filtered=M2E_v(human_hand_position_world_filtered_mathlib);
 
-			// filtering the velocity
-	        hand_real_vel_filter->SetTarget(E2M_v(human_hand_real_velocity_world));
-	        hand_real_vel_filter->Update();
-	        hand_real_vel_filter->GetState(human_hand_real_velocity_root_filtered_mathlib, human_hand_real_acceleration_root_mathlib);
-	        hand_velocity_filtered = M2E_v(human_hand_real_velocity_root_filtered_mathlib);
+			// // filtering the velocity
+	  //       hand_real_vel_filter->SetTarget(E2M_v(human_hand_real_velocity_world));
+	  //       hand_real_vel_filter->Update();
+	  //       hand_real_vel_filter->GetState(human_hand_real_velocity_root_filtered_mathlib, human_hand_real_acceleration_root_mathlib);
+	  //       hand_velocity_filtered = M2E_v(human_hand_real_velocity_root_filtered_mathlib);
 
 	        
 
-			handPosition[0]=(1-a2)*handPrevPosition[0]+a2*mocapmsg.pose.position.x;
-		    handPosition[1]=(1-a2)*handPrevPosition[1]+a2*mocapmsg.pose.position.y;
-		    handPosition[2]=(1-a2)*handPrevPosition[2]+a2*mocapmsg.pose.position.z;
+			// handPosition[0]=(1-a2)*handPrevPosition[0]+a2*mocapmsg.pose.position.x;
+		 //    handPosition[1]=(1-a2)*handPrevPosition[1]+a2*mocapmsg.pose.position.y;
+		 //    handPosition[2]=(1-a2)*handPrevPosition[2]+a2*mocapmsg.pose.position.z;
+
+		    handPosition[0]=mocapmsg.pose.position.x;
+		    handPosition[1]=mocapmsg.pose.position.y;
+		    handPosition[2]=mocapmsg.pose.position.z;
 
 		    handOrientation[0]=(1-a2)*handPrevOrientation[0]+a2*mocapmsg.pose.orientation.x;
 		    handOrientation[1]=(1-a2)*handPrevOrientation[1]+a2*mocapmsg.pose.orientation.y;
@@ -268,10 +281,11 @@ void handListener(const geometry_msgs::PoseStamped& mocapmsg){
 
 		   
 
-		    prev_hand_position(0)=human_hand_position_world_filtered_mathlib(0);
-			prev_hand_position(1)=human_hand_position_world_filtered_mathlib(1);		    
-			prev_hand_position(2)=human_hand_position_world_filtered_mathlib(2);
+		 //    prev_hand_position(0)=human_hand_position_world_filtered_mathlib(0);
+			// prev_hand_position(1)=human_hand_position_world_filtered_mathlib(1);		    
+			// prev_hand_position(2)=human_hand_position_world_filtered_mathlib(2);
 
+			
 			
 
 		    handStamp=mocapmsg.header.seq;
@@ -323,53 +337,60 @@ void shoulderListener(const geometry_msgs::PoseStamped& mocapmsg){
     MathLib::Vector shoulder_acceleration_mathlib;
 
 
+    
+
 
 	if(!_firstshoulderPoseReceived)
 		{
+			
 			_firstshoulderPoseReceived=true;
+
 
 
 		   	shoulderPosition[0]=mocapmsg.pose.position.x;
 		    shoulderPosition[1]=mocapmsg.pose.position.y;
 		    shoulderPosition[2]=mocapmsg.pose.position.z;
 
+		    std::cout<<"shoulder pose: " << shoulderPosition[0] << ", " << shoulderPosition[1] << ", " << shoulderPosition[2] << "\n";
 
-		    shoulder_position_world(0)=mocapmsg.pose.position.x;
-		    shoulder_position_world(1)=mocapmsg.pose.position.y;
-		    shoulder_position_world(2)=mocapmsg.pose.position.z;
+		 //    shoulder_position_world(0)=mocapmsg.pose.position.x;
+		 //    shoulder_position_world(1)=mocapmsg.pose.position.y;
+		 //    shoulder_position_world(2)=mocapmsg.pose.position.z;
 
-		    // filtering the shoulder position
-	        shoulder_pos_filter->SetTarget(E2M_v(shoulder_position_world));
-	        shoulder_pos_filter->Update();
-	        shoulder_pos_filter->GetState(shoulder_position_filtered_mathlib, shoulder_real_velocity_mathlib);
+		 //    // filtering the shoulder position
+	  //       shoulder_pos_filter->SetTarget(E2M_v(shoulder_position_world));
+	  //       shoulder_pos_filter->Update();
+	  //       shoulder_pos_filter->GetState(shoulder_position_filtered_mathlib, shoulder_real_velocity_mathlib);
 
-	        curr_shoulder_position_filtered=M2E_v(shoulder_position_filtered_mathlib);
-
-
-	        // filtering the shoulder velocity
-	        hand_real_vel_filter->SetTarget(shoulder_real_velocity_mathlib);
-	        hand_real_vel_filter->Update();
-	        hand_real_vel_filter->GetState(shoulder_velocity_filtered_mathlib, shoulder_acceleration_mathlib);
-	        curr_shoulder_velocity_filtered = M2E_v(shoulder_velocity_filtered_mathlib);
-
-		    shoulderOrientation[0]=mocapmsg.pose.orientation.x;
-		    shoulderOrientation[1]=mocapmsg.pose.orientation.y;
-		    shoulderOrientation[2]=mocapmsg.pose.orientation.z;
-		    shoulderOrientation[3]=mocapmsg.pose.orientation.w;
-
-		    shoulderPrevPosition[0]=mocapmsg.pose.position.x;
-		    shoulderPrevPosition[1]=mocapmsg.pose.position.y;
-		    shoulderPrevPosition[2]=mocapmsg.pose.position.z;
-
-		    shoulderPrevOrientation[0]=mocapmsg.pose.orientation.x;
-		    shoulderPrevOrientation[1]=mocapmsg.pose.orientation.y;
-		    shoulderPrevOrientation[2]=mocapmsg.pose.orientation.z;
-		    shoulderPrevOrientation[3]=mocapmsg.pose.orientation.w;
+	  //       curr_shoulder_position_filtered=M2E_v(shoulder_position_filtered_mathlib);
 
 
-			prev_shoulder_position(0)=mocapmsg.pose.position.x;
-			prev_shoulder_position(1)=mocapmsg.pose.position.y;		    
-			prev_shoulder_position(2)=mocapmsg.pose.position.z;
+	  //       // filtering the shoulder velocity
+	  //       hand_real_vel_filter->SetTarget(shoulder_real_velocity_mathlib);
+	  //       hand_real_vel_filter->Update();
+	  //       hand_real_vel_filter->GetState(shoulder_velocity_filtered_mathlib, shoulder_acceleration_mathlib);
+	  //       curr_shoulder_velocity_filtered = M2E_v(shoulder_velocity_filtered_mathlib);
+
+		 //    shoulderOrientation[0]=mocapmsg.pose.orientation.x;
+		 //    shoulderOrientation[1]=mocapmsg.pose.orientation.y;
+		 //    shoulderOrientation[2]=mocapmsg.pose.orientation.z;
+		 //    shoulderOrientation[3]=mocapmsg.pose.orientation.w;
+
+		 //    shoulderPrevPosition[0]=mocapmsg.pose.position.x;
+		 //    shoulderPrevPosition[1]=mocapmsg.pose.position.y;
+		 //    shoulderPrevPosition[2]=mocapmsg.pose.position.z;
+
+		 //    shoulderPrevOrientation[0]=mocapmsg.pose.orientation.x;
+		 //    shoulderPrevOrientation[1]=mocapmsg.pose.orientation.y;
+		 //    shoulderPrevOrientation[2]=mocapmsg.pose.orientation.z;
+		 //    shoulderPrevOrientation[3]=mocapmsg.pose.orientation.w;
+
+
+			// prev_shoulder_position(0)=mocapmsg.pose.position.x;
+			// prev_shoulder_position(1)=mocapmsg.pose.position.y;		    
+			// prev_shoulder_position(2)=mocapmsg.pose.position.z;
+
+			std::cout<<"Initial shoulder pose received\n";
 
 		    shoulderStamp=mocapmsg.header.seq;
 		
@@ -379,30 +400,35 @@ void shoulderListener(const geometry_msgs::PoseStamped& mocapmsg){
 
 			//std::cout<<"okokokokokok\n";
 			
+			
 
-			shoulderPosition[0]=(1-a2)*shoulderPrevPosition[0]+a2*mocapmsg.pose.position.x;
-		    shoulderPosition[1]=(1-a2)*shoulderPrevPosition[1]+a2*mocapmsg.pose.position.y;
-		    shoulderPosition[2]=(1-a2)*shoulderPrevPosition[2]+a2*mocapmsg.pose.position.z;
+			// shoulderPosition[0]=(1-a2)*shoulderPrevPosition[0]+a2*mocapmsg.pose.position.x;
+		 //    shoulderPosition[1]=(1-a2)*shoulderPrevPosition[1]+a2*mocapmsg.pose.position.y;
+		 //    shoulderPosition[2]=(1-a2)*shoulderPrevPosition[2]+a2*mocapmsg.pose.position.z;
 
-		    shoulder_position_world(0)=mocapmsg.pose.position.x;
-		    shoulder_position_world(1)=mocapmsg.pose.position.y;
-		    shoulder_position_world(2)=mocapmsg.pose.position.z;
+		    shoulderPosition[0]=mocapmsg.pose.position.x;
+		    shoulderPosition[1]=mocapmsg.pose.position.y;
+		    shoulderPosition[2]=mocapmsg.pose.position.z;
 
-		    // filtering the shoulder position
-	        shoulder_pos_filter->SetTarget(E2M_v(shoulder_position_world));
-	        shoulder_pos_filter->Update();
-	        shoulder_pos_filter->GetState(shoulder_position_filtered_mathlib, shoulder_real_velocity_mathlib);
+		    // shoulder_position_world(0)=mocapmsg.pose.position.x;
+		    // shoulder_position_world(1)=mocapmsg.pose.position.y;
+		    // shoulder_position_world(2)=mocapmsg.pose.position.z;
 
-	        curr_shoulder_position_filtered=M2E_v(shoulder_position_filtered_mathlib);
+		    // // filtering the shoulder position
+	     //    shoulder_pos_filter->SetTarget(E2M_v(shoulder_position_world));
+	     //    shoulder_pos_filter->Update();
+	     //    shoulder_pos_filter->GetState(shoulder_position_filtered_mathlib, shoulder_real_velocity_mathlib);
+
+	     //    curr_shoulder_position_filtered=M2E_v(shoulder_position_filtered_mathlib);
 
 
-	        // filtering the shoulder velocity
-	        hand_real_vel_filter->SetTarget(shoulder_real_velocity_mathlib);
-	        hand_real_vel_filter->Update();
-	        hand_real_vel_filter->GetState(shoulder_velocity_filtered_mathlib, shoulder_acceleration_mathlib);
-	        curr_shoulder_velocity_filtered = M2E_v(shoulder_velocity_filtered_mathlib);
+	     //    // filtering the shoulder velocity
+	     //    hand_real_vel_filter->SetTarget(shoulder_real_velocity_mathlib);
+	     //    hand_real_vel_filter->Update();
+	     //    hand_real_vel_filter->GetState(shoulder_velocity_filtered_mathlib, shoulder_acceleration_mathlib);
+	     //    curr_shoulder_velocity_filtered = M2E_v(shoulder_velocity_filtered_mathlib);
 
-	        // std::cout<<"sh_vel: " << curr_shoulder_velocity_filtered(0) <<",  " << curr_shoulder_velocity_filtered(1) << ", " << curr_shoulder_velocity_filtered(2) << "\n";
+	     //    // std::cout<<"sh_vel: " << curr_shoulder_velocity_filtered(0) <<",  " << curr_shoulder_velocity_filtered(1) << ", " << curr_shoulder_velocity_filtered(2) << "\n";
 
 
 		    shoulderOrientation[0]=(1-a2)*shoulderPrevOrientation[0]+a2*mocapmsg.pose.orientation.x;
@@ -503,9 +529,21 @@ std::vector<double> handRP(std::vector<double> handPos, std::vector<double> shou
 
 	std::vector<double> hrp(3,0);				// the relative velocity of the hand
 
+
+
 	hrp[0]=handPos[0]-shoulderPos[0];
 	hrp[1]=handPos[1]-shoulderPos[1];
 	hrp[2]=handPos[2]-shoulderPos[2];
+
+	std::cout<<"current real hand position: " << hrp[0] << ", " << hrp[1] << ", " << hrp[2] <<" \n";
+
+	if(!_firstHandRP){
+		
+		_firstHandRP=true;
+		return hrp;
+	}
+
+	
 
 	Eigen::VectorXd human_hand_position_world(3);
     Eigen::VectorXd human_hand_real_velocity_world(3);
@@ -520,9 +558,13 @@ std::vector<double> handRP(std::vector<double> handPos, std::vector<double> shou
 	human_hand_position_world(1)=hrp[1];
 	human_hand_position_world(2)=hrp[2];
 
+	std::cout<<"m current real hand position: " << human_hand_position_world(0) << ", " << human_hand_position_world(1) << ", " << human_hand_position_world(2) <<" \n";
 		    
 	// filtering the hand position
 	hand_pos_filter->SetTarget(E2M_v(human_hand_position_world));
+
+
+	
 	hand_pos_filter->Update();
 	hand_pos_filter->GetState(human_hand_position_world_filtered_mathlib, human_hand_real_velocity_world_mathlib);
 	cuur_hand_rev_velocity_filtered = M2E_v(human_hand_real_velocity_world_mathlib);
@@ -532,6 +574,8 @@ std::vector<double> handRP(std::vector<double> handPos, std::vector<double> shou
 	hrp[0]=curr_hand_rev_position_filtered(0);
 	hrp[1]=curr_hand_rev_position_filtered(1);
 	hrp[2]=curr_hand_rev_position_filtered(2);
+
+	std::cout<<"current filtered hand position: " << hrp[0] << ", " << hrp[1] << ", " << hrp[2] <<" \n";
 
 	return hrp;
 }
@@ -642,10 +686,6 @@ int main(int argc, char **argv)
 {
 
 
-
-
-
-
     // initialize the node
     ros::init(argc, argv, "handtracker");
 
@@ -665,6 +705,8 @@ int main(int argc, char **argv)
     ros::Subscriber elbowSub=n.subscribe("elbow/pose", 10, elbowListener);
 
     ros::Subscriber shoulderSub=n.subscribe("shoulder/pose", 10, shoulderListener);
+
+    ros::Subscriber robotSub=n.subscribe("lwr/ee_pose", 10, robotListener);
 
 
 	// ros::Subscriber _subRealPose;						// Subscribe to robot current pose
@@ -706,9 +748,39 @@ int main(int argc, char **argv)
 
 
 	// set initial position and velocity to zero
-	prev_hand_position(0)=0.0;
-	prev_hand_position(1)=0.0; 
-	prev_hand_position(2)=0.0;	
+	// prev_hand_position(0)=0.0;
+	// prev_hand_position(1)=0.0; 
+	// prev_hand_position(2)=0.0;	
+
+	// prev_hand_real_velocity(0)=0.0;
+	// prev_hand_real_velocity(1)=0.0;
+	// prev_hand_real_velocity(2)=0.0;
+
+	// spinonce for finding the initial position and velocity ot the hand
+	while(!_firstshoulderPoseReceived){
+		
+		ros::spinOnce();
+		loop_rate.sleep();
+	}
+	
+	// while(!_firsthandPoseReceived){
+		
+	// 	ros::spinOnce();
+	// 	loop_rate.sleep();
+	// }
+	
+	std::vector <double> initPos=handRP(handPosition,shoulderPosition);
+	
+
+	// std::vector <double> initVel=compHandRelVel();
+
+	
+
+	prev_hand_position(0)=initPos[0];
+	prev_hand_position(1)=initPos[1];
+	prev_hand_position(2)=initPos[2];
+
+	std::cout<<"prev_hand_position: " << prev_hand_position << "\n";
 
 	prev_hand_real_velocity(0)=0.0;
 	prev_hand_real_velocity(1)=0.0;
@@ -717,8 +789,8 @@ int main(int argc, char **argv)
 	// filter parameters
 
 	double wn_filter_position, wn_filter_velocity, wn_filter_c, dt, dim,sample_time;
-    wn_filter_position = 1.0;
-    wn_filter_velocity = 30.0;
+    wn_filter_position = 10.0;
+    wn_filter_velocity = 30.0;//30
 	wn_filter_c = 25.0;
 	dt = (1.0/mocapRate);
     dim = 3;
@@ -773,11 +845,11 @@ int main(int argc, char **argv)
 
     	// std::cout<< "time passed: " << currentTime - checkTime<< "\n";
 
-    	currentVel2=compHandRelVel();
+    	//currentVel2=compHandRelVel();
 
 		// _msgVelTester.linear.x = currentVel2[0];
-  //   	_msgVelTester.linear.y = currentVel2[1];
-	 //    _msgVelTester.linear.z = currentVel2[2];
+  		// _msgVelTester.linear.y = currentVel2[1];
+	 	// _msgVelTester.linear.z = currentVel2[2];
 	    // _msgVelTester.linear.x = hand_velocity_filtered(0);
     	// _msgVelTester.linear.y = hand_velocity_filtered(1);
 	    // _msgVelTester.linear.z = hand_velocity_filtered(2);
@@ -800,8 +872,7 @@ int main(int argc, char **argv)
     		speedMsg.sPer=speedPer;
     		speedMsg.dir=handDirection;
 
-    		// update checking time
-    		checkTime=ros::Time::now().toSec();
+
 
 
 
@@ -847,6 +918,10 @@ int main(int argc, char **argv)
 
     		// remove the oldest relative position
     		handRelPos.clear();
+
+
+    		// update checking time
+    		checkTime=ros::Time::now().toSec();
 
     	}
 
