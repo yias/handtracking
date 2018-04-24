@@ -48,13 +48,32 @@ double startTime;
 
 /*-- Variables related to the mocap system --*/
 
-double gain=50;													// velocity gain
-double a=0.9;													// smoothing factor for the velocity
-double a2=0.1;													// smoothing factor for the position
+double vel_gain=1;													// velocity gain
 
 double lookTW=0.1;	                                            // the timewindow to look back for the average velocity (in seconds)
 double velThreshold=0.018;                                      // velocity threshold for destinguish the motion or no=motion of the hand
+
+double robot_velUpperBound=0.45;
+double robot_velLowerBound=0.05;								// 
+
+double hand_velUpperBound=0.6;
+double hand_velLowerBound=0.0;
+
+double alpha,beta;
+
+
+//double velUpperBound=0.4;
+
+float speedPer=0;
+
+
 int mocapRate=120;                                              // the sample rate of the motion capture system
+
+
+double a=0.9;													// smoothing factor for the velocity
+double a2=0.1;													// smoothing factor for the position
+
+
 
 unsigned int handCounter=0;                                     // counter for hand-related messages from the mocap system
 
@@ -113,9 +132,7 @@ double current_shdistance=0;									// current distance of the hand from the sh
 double previous_shdistance=0;									// previous distance of the hand from the shoulder
 float handDirection=0;
 
-double velUpperBound=0.4;
 
-float speedPer=0;
 
 bool _firstHandRP=false;
 
@@ -186,45 +203,7 @@ void handListener(const geometry_msgs::PoseStamped& mocapmsg){
 		    handPosition[1]=mocapmsg.pose.position.y;
 		    handPosition[2]=mocapmsg.pose.position.z;
 
-		    std::cout<<"hand pose: " << handPosition[0] << ", " << handPosition[1] << ", " << handPosition[2] << "\n"; 
-
-		 //    human_hand_position_world(0)=mocapmsg.pose.position.x;
-		 //    human_hand_position_world(1)=mocapmsg.pose.position.y;
-		 //    human_hand_position_world(2)=mocapmsg.pose.position.z;
-
-		 //    // filtering the hand position
-	  //       hand_pos_filter->SetTarget(E2M_v(human_hand_position_world));
-	  //       hand_pos_filter->Update();
-	  //       hand_pos_filter->GetState(human_hand_position_world_filtered_mathlib, human_hand_real_velocity_world_mathlib);
-
-	  //       curr_hand_position_filtered=M2E_v(human_hand_position_world_filtered_mathlib);
-
-
-	  //       // // filtering the hand velocity
-	  //       human_hand_real_velocity_world = M2E_v(human_hand_position_world_filtered_mathlib);
-	  //       hand_real_vel_filter->SetTarget(E2M_v(human_hand_real_velocity_world));
-	  //       hand_real_vel_filter->Update();
-	  //       hand_real_vel_filter->GetState(human_hand_real_velocity_root_filtered_mathlib, human_hand_real_acceleration_root_mathlib);
-	  //       hand_velocity_filtered = M2E_v(human_hand_real_velocity_root_filtered_mathlib);
-
-
-		 //    handOrientation[0]=mocapmsg.pose.orientation.x;
-		 //    handOrientation[1]=mocapmsg.pose.orientation.y;
-		 //    handOrientation[2]=mocapmsg.pose.orientation.z;
-		 //    handOrientation[3]=mocapmsg.pose.orientation.w;
-
-		 //    handPrevPosition[0]=mocapmsg.pose.position.x;
-		 //    handPrevPosition[1]=mocapmsg.pose.position.y;
-		 //    handPrevPosition[2]=mocapmsg.pose.position.z;
-
-		 //    handPrevOrientation[0]=mocapmsg.pose.orientation.x;
-		 //    handPrevOrientation[1]=mocapmsg.pose.orientation.y;
-		 //    handPrevOrientation[2]=mocapmsg.pose.orientation.z;
-		 //    handPrevOrientation[3]=mocapmsg.pose.orientation.w;
-
-		 //    prev_hand_position(0)=mocapmsg.pose.position.x;
-			// prev_hand_position(1)=mocapmsg.pose.position.y;		    
-			// prev_hand_position(2)=mocapmsg.pose.position.z;
+		    //std::cout<<"hand pose: " << handPosition[0] << ", " << handPosition[1] << ", " << handPosition[2] << "\n"; 
 
 			std::cout<<"Initial hand pose received\n";
 
@@ -240,26 +219,6 @@ void handListener(const geometry_msgs::PoseStamped& mocapmsg){
 			human_hand_position_world(0)=mocapmsg.pose.position.x;
 		    human_hand_position_world(1)=mocapmsg.pose.position.y;
 		    human_hand_position_world(2)=mocapmsg.pose.position.z;
-
-		    
-		 //    // filtering the hand position
-	  //       hand_pos_filter->SetTarget(E2M_v(human_hand_position_world));
-	  //       hand_pos_filter->Update();
-	  //       hand_pos_filter->GetState(human_hand_position_world_filtered_mathlib, human_hand_real_velocity_world_mathlib);
-	  //       human_hand_real_velocity_world = M2E_v(human_hand_real_velocity_world_mathlib);
-	  //       curr_hand_position_filtered=M2E_v(human_hand_position_world_filtered_mathlib);
-
-			// // filtering the velocity
-	  //       hand_real_vel_filter->SetTarget(E2M_v(human_hand_real_velocity_world));
-	  //       hand_real_vel_filter->Update();
-	  //       hand_real_vel_filter->GetState(human_hand_real_velocity_root_filtered_mathlib, human_hand_real_acceleration_root_mathlib);
-	  //       hand_velocity_filtered = M2E_v(human_hand_real_velocity_root_filtered_mathlib);
-
-	        
-
-			// handPosition[0]=(1-a2)*handPrevPosition[0]+a2*mocapmsg.pose.position.x;
-		 //    handPosition[1]=(1-a2)*handPrevPosition[1]+a2*mocapmsg.pose.position.y;
-		 //    handPosition[2]=(1-a2)*handPrevPosition[2]+a2*mocapmsg.pose.position.z;
 
 		    handPosition[0]=mocapmsg.pose.position.x;
 		    handPosition[1]=mocapmsg.pose.position.y;
@@ -278,13 +237,6 @@ void handListener(const geometry_msgs::PoseStamped& mocapmsg){
 		    handPrevOrientation[1]=handOrientation[1];
 		    handPrevOrientation[2]=handOrientation[2];
 		    handPrevOrientation[3]=handOrientation[3];
-
-		   
-
-		 //    prev_hand_position(0)=human_hand_position_world_filtered_mathlib(0);
-			// prev_hand_position(1)=human_hand_position_world_filtered_mathlib(1);		    
-			// prev_hand_position(2)=human_hand_position_world_filtered_mathlib(2);
-
 			
 			
 
@@ -351,44 +303,7 @@ void shoulderListener(const geometry_msgs::PoseStamped& mocapmsg){
 		    shoulderPosition[1]=mocapmsg.pose.position.y;
 		    shoulderPosition[2]=mocapmsg.pose.position.z;
 
-		    std::cout<<"shoulder pose: " << shoulderPosition[0] << ", " << shoulderPosition[1] << ", " << shoulderPosition[2] << "\n";
-
-		 //    shoulder_position_world(0)=mocapmsg.pose.position.x;
-		 //    shoulder_position_world(1)=mocapmsg.pose.position.y;
-		 //    shoulder_position_world(2)=mocapmsg.pose.position.z;
-
-		 //    // filtering the shoulder position
-	  //       shoulder_pos_filter->SetTarget(E2M_v(shoulder_position_world));
-	  //       shoulder_pos_filter->Update();
-	  //       shoulder_pos_filter->GetState(shoulder_position_filtered_mathlib, shoulder_real_velocity_mathlib);
-
-	  //       curr_shoulder_position_filtered=M2E_v(shoulder_position_filtered_mathlib);
-
-
-	  //       // filtering the shoulder velocity
-	  //       hand_real_vel_filter->SetTarget(shoulder_real_velocity_mathlib);
-	  //       hand_real_vel_filter->Update();
-	  //       hand_real_vel_filter->GetState(shoulder_velocity_filtered_mathlib, shoulder_acceleration_mathlib);
-	  //       curr_shoulder_velocity_filtered = M2E_v(shoulder_velocity_filtered_mathlib);
-
-		 //    shoulderOrientation[0]=mocapmsg.pose.orientation.x;
-		 //    shoulderOrientation[1]=mocapmsg.pose.orientation.y;
-		 //    shoulderOrientation[2]=mocapmsg.pose.orientation.z;
-		 //    shoulderOrientation[3]=mocapmsg.pose.orientation.w;
-
-		 //    shoulderPrevPosition[0]=mocapmsg.pose.position.x;
-		 //    shoulderPrevPosition[1]=mocapmsg.pose.position.y;
-		 //    shoulderPrevPosition[2]=mocapmsg.pose.position.z;
-
-		 //    shoulderPrevOrientation[0]=mocapmsg.pose.orientation.x;
-		 //    shoulderPrevOrientation[1]=mocapmsg.pose.orientation.y;
-		 //    shoulderPrevOrientation[2]=mocapmsg.pose.orientation.z;
-		 //    shoulderPrevOrientation[3]=mocapmsg.pose.orientation.w;
-
-
-			// prev_shoulder_position(0)=mocapmsg.pose.position.x;
-			// prev_shoulder_position(1)=mocapmsg.pose.position.y;		    
-			// prev_shoulder_position(2)=mocapmsg.pose.position.z;
+		    // std::cout<<"shoulder pose: " << shoulderPosition[0] << ", " << shoulderPosition[1] << ", " << shoulderPosition[2] << "\n";
 
 			std::cout<<"Initial shoulder pose received\n";
 
@@ -398,38 +313,10 @@ void shoulderListener(const geometry_msgs::PoseStamped& mocapmsg){
 		
 		if(mocapmsg.header.seq!=shoulderStamp){
 
-			//std::cout<<"okokokokokok\n";
-			
-			
-
-			// shoulderPosition[0]=(1-a2)*shoulderPrevPosition[0]+a2*mocapmsg.pose.position.x;
-		 //    shoulderPosition[1]=(1-a2)*shoulderPrevPosition[1]+a2*mocapmsg.pose.position.y;
-		 //    shoulderPosition[2]=(1-a2)*shoulderPrevPosition[2]+a2*mocapmsg.pose.position.z;
 
 		    shoulderPosition[0]=mocapmsg.pose.position.x;
 		    shoulderPosition[1]=mocapmsg.pose.position.y;
 		    shoulderPosition[2]=mocapmsg.pose.position.z;
-
-		    // shoulder_position_world(0)=mocapmsg.pose.position.x;
-		    // shoulder_position_world(1)=mocapmsg.pose.position.y;
-		    // shoulder_position_world(2)=mocapmsg.pose.position.z;
-
-		    // // filtering the shoulder position
-	     //    shoulder_pos_filter->SetTarget(E2M_v(shoulder_position_world));
-	     //    shoulder_pos_filter->Update();
-	     //    shoulder_pos_filter->GetState(shoulder_position_filtered_mathlib, shoulder_real_velocity_mathlib);
-
-	     //    curr_shoulder_position_filtered=M2E_v(shoulder_position_filtered_mathlib);
-
-
-	     //    // filtering the shoulder velocity
-	     //    hand_real_vel_filter->SetTarget(shoulder_real_velocity_mathlib);
-	     //    hand_real_vel_filter->Update();
-	     //    hand_real_vel_filter->GetState(shoulder_velocity_filtered_mathlib, shoulder_acceleration_mathlib);
-	     //    curr_shoulder_velocity_filtered = M2E_v(shoulder_velocity_filtered_mathlib);
-
-	     //    // std::cout<<"sh_vel: " << curr_shoulder_velocity_filtered(0) <<",  " << curr_shoulder_velocity_filtered(1) << ", " << curr_shoulder_velocity_filtered(2) << "\n";
-
 
 		    shoulderOrientation[0]=(1-a2)*shoulderPrevOrientation[0]+a2*mocapmsg.pose.orientation.x;
 		    shoulderOrientation[1]=(1-a2)*shoulderPrevOrientation[1]+a2*mocapmsg.pose.orientation.y;
@@ -457,12 +344,9 @@ void shoulderListener(const geometry_msgs::PoseStamped& mocapmsg){
 
  
 
-    // mocapTime.push_back((ros::Time::now().toSec())-startTime);
-
  
 
     shoulderCounter++;
-    //ROS_INFO("I heard: [%d] messages from mocap\n", mocapCounter);
 }
 
 
@@ -620,6 +504,7 @@ std::vector<double> compDesiredVel(std::vector<double> curVel){
 std::vector<double> compHandRelVel(){
 
 	std::vector<double> curVel(3,0);
+	std::vector<double> desVel(3,0);				// the desired velocity of the hand
 
 
     MathLib::Vector hand_rel_velocity_mathlib;
@@ -636,22 +521,29 @@ std::vector<double> compHandRelVel(){
 	curVel[1]=hand_rel_velocity_mathlib(1);
 	curVel[2]=hand_rel_velocity_mathlib(2);
 
-	// curVel[0]=gain*(hand_velocity_filtered(0)-curr_shoulder_velocity_filtered(0));
-	// curVel[1]=gain*(hand_velocity_filtered(1)-curr_shoulder_velocity_filtered(1));
-	// curVel[2]=gain*(hand_velocity_filtered(2)-curr_shoulder_velocity_filtered(2));
 
-	// curVel[0]=gain*(hand_velocity_filtered(0)-curr_shoulder_velocity_filtered(0));
-	// curVel[1]=gain*(hand_velocity_filtered(1)-curr_shoulder_velocity_filtered(1));
-	// curVel[2]=gain*(hand_velocity_filtered(2)-curr_shoulder_velocity_filtered(2));
+	double speed=std::sqrt(curVel[0]*curVel[0]+curVel[1]*curVel[1]+curVel[2]*curVel[2]);
+
+	// map to the robot speed
+
+	double ee_speed=Hand2RobotSpeed(speed);
+	
+	if(speed>=velThreshold){
+
+		desVel[0]=vel_gain*ee_speed*curVel[0]/speed;
+		desVel[1]=vel_gain*ee_speed*curVel[1]/speed;
+		desVel[2]=vel_gain*ee_speed*curVel[2]/speed;
 
 
+	}else{
+		desVel[0]=0.0;
+		desVel[1]=0.0;
+		desVel[2]=0.0;
+	}
 
-	return curVel;
+	
 
 
-	// std::vector<double> desVel(3,0);				// the desired velocity of the hand
-
-	// double speed=std::sqrt(curVel[0]*curVel[0]+curVel[1]*curVel[1]+curVel[2]*curVel[2]);
 
 	// if(!(speed<=velThreshold)){
 
@@ -680,7 +572,48 @@ std::vector<double> compHandRelVel(){
 
 	// return desVel;
 
+	return curVel;
+	
+
 }
+
+
+void computeLinearParameters_speed(){
+
+	Eigen::MAtrix2d A;
+	Eigen::Vector2d B;
+	Eigen::Vector2d Sol;
+
+	A << (hand_velUpperBound+hand_velLowerBound)/2, 1, 0.1, 1;
+
+	std::cout<<"A=\n "<< A <<"\n";
+
+	B << (robot_velUpperBound+robot_velLowerBound)/2, 0.1;
+	
+	std::cout<<"B=\n "<< B <<"\n";
+
+	Sol=A.colPivHouseholderQr().solve(B);
+
+	alpha=Sol(0);
+	beta=Sol(1);
+
+	std::cout<<"alpha= " << alpha << ", beta= " << beta <<"\n";
+
+}
+
+
+double Hand2RobotSpeed(double handspeed){
+
+	double y1=((robot_velUpperBound+robot_velLowerBound)/2)+((robot_velUpperBound-robot_velLowerBound)/2)*std::tahn((handspeed-((hand_velUpperBound+hand_velLowerBound)/2))*(6/(hand_velUpperBound-hand_velLowerBound)));
+
+	double y2=alpha*+beta;
+
+	double y=(1-std::tanh(handspeed/((hand_velUpperBound+hand_velLowerBound)/2)))*y2+std::tanh(handspeed/((hand_velUpperBound+hand_velLowerBound)/2))*y1;
+
+	return y;
+
+}
+
 
 int main(int argc, char **argv)
 {
@@ -745,6 +678,8 @@ int main(int argc, char **argv)
 	std::vector<double> desiredVel(3,0);    
 
 	std::vector<double> currentVel2(3,0);
+
+	computeLinearParameters_speed();
 
 
 	// set initial position and velocity to zero
