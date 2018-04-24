@@ -48,15 +48,15 @@ double startTime;
 
 /*-- Variables related to the mocap system --*/
 
-double vel_gain=1;													// velocity gain
+double vel_gain=1.2;													// velocity gain
 
 double lookTW=0.1;	                                            // the timewindow to look back for the average velocity (in seconds)
 double velThreshold=0.05;                                      // velocity threshold for destinguish the motion or no=motion of the hand
 
 double robot_velUpperBound=0.45;
-double robot_velLowerBound=0.05;								// 
+double robot_velLowerBound=0.1;								// 
 
-double hand_velUpperBound=0.6;
+double hand_velUpperBound=0.8;
 double hand_velLowerBound=0.0;
 
 double alpha,beta;
@@ -421,7 +421,7 @@ std::vector<double> handRP(std::vector<double> handPos, std::vector<double> shou
 	hrp[1]=handPos[1]-shoulderPos[1];
 	hrp[2]=handPos[2]-shoulderPos[2];
 
-	std::cout<<"current real hand position: " << hrp[0] << ", " << hrp[1] << ", " << hrp[2] <<" \n";
+	//std::cout<<"current real hand position: " << hrp[0] << ", " << hrp[1] << ", " << hrp[2] <<" \n";
 
 	if(!_firstHandRP){
 		
@@ -444,7 +444,7 @@ std::vector<double> handRP(std::vector<double> handPos, std::vector<double> shou
 	human_hand_position_world(1)=hrp[1];
 	human_hand_position_world(2)=hrp[2];
 
-	std::cout<<"m current real hand position: " << human_hand_position_world(0) << ", " << human_hand_position_world(1) << ", " << human_hand_position_world(2) <<" \n";
+	//std::cout<<"m current real hand position: " << human_hand_position_world(0) << ", " << human_hand_position_world(1) << ", " << human_hand_position_world(2) <<" \n";
 		    
 	// filtering the hand position
 	hand_pos_filter->SetTarget(E2M_v(human_hand_position_world));
@@ -461,7 +461,7 @@ std::vector<double> handRP(std::vector<double> handPos, std::vector<double> shou
 	hrp[1]=curr_hand_rev_position_filtered(1);
 	hrp[2]=curr_hand_rev_position_filtered(2);
 
-	std::cout<<"current filtered hand position: " << hrp[0] << ", " << hrp[1] << ", " << hrp[2] <<" \n";
+	//std::cout<<"current filtered hand position: " << hrp[0] << ", " << hrp[1] << ", " << hrp[2] <<" \n";
 
 	return hrp;
 }
@@ -555,6 +555,7 @@ std::vector<double> compHandRelVel(){
 		desVel[2]=vel_gain*ee_speed*curVel[2]/speed;
 
 
+
 	}else{
 		desVel[0]=0.0;
 		desVel[1]=0.0;
@@ -562,6 +563,7 @@ std::vector<double> compHandRelVel(){
 	}
 
 	
+	std::cout<< "dif" << ee_speed-std::sqrt(desVel[0]*desVel[0]+desVel[1]*desVel[1]+desVel[2]*desVel[2]) << "\n";
 
 
 
