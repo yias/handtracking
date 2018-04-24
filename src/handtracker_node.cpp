@@ -51,7 +51,7 @@ double startTime;
 double vel_gain=1;													// velocity gain
 
 double lookTW=0.1;	                                            // the timewindow to look back for the average velocity (in seconds)
-double velThreshold=0.018;                                      // velocity threshold for destinguish the motion or no=motion of the hand
+double velThreshold=0.05;                                      // velocity threshold for destinguish the motion or no=motion of the hand
 
 double robot_velUpperBound=0.45;
 double robot_velLowerBound=0.05;								// 
@@ -65,13 +65,15 @@ double alpha,beta;
 //double velUpperBound=0.4;
 
 float speedPer=0;
-
+float ee_speed=0;
 
 int mocapRate=120;                                              // the sample rate of the motion capture system
 
 
 double a=0.9;													// smoothing factor for the velocity
 double a2=0.1;													// smoothing factor for the position
+
+
 
 
 
@@ -479,9 +481,9 @@ std::vector<double> compDesiredVel(std::vector<double> curVel){
 			desVel[2]=velpreviousValue[2];
 
 		}else{
-			desVel[0]=gain*((1-a)*velpreviousValue[0]+a*(velUpperBound*curVel[0]/speed))/2;
-			desVel[1]=gain*((1-a)*velpreviousValue[1]+a*(velUpperBound*curVel[1]/speed))/2;
-			desVel[2]=gain*((1-a)*velpreviousValue[2]+a*(velUpperBound*curVel[2]/speed))/2;
+			desVel[0]=vel_gain*((1-a)*velpreviousValue[0]+a*(hand_velUpperBound*curVel[0]/speed))/2;
+			desVel[1]=vel_gain*((1-a)*velpreviousValue[1]+a*(hand_velUpperBound*curVel[1]/speed))/2;
+			desVel[2]=vel_gain*((1-a)*velpreviousValue[2]+a*(hand_velUpperBound*curVel[2]/speed))/2;
 
 			// speedPer=(std::sqrt(desVel[0]*desVel[0]+desVel[1]*desVel[1]+desVel[2]*desVel[2]))/(2*velUpperBound);
 
@@ -494,17 +496,34 @@ std::vector<double> compDesiredVel(std::vector<double> curVel){
 
 	//speedPer=(std::sqrt(desVel[0]*desVel[0]+desVel[1]*desVel[1]+desVel[2]*desVel[2]))/(2*velUpperBound);
 	//speedPer=(std::sqrt(desVel[0]*desVel[0]+desVel[1]*desVel[1]+desVel[2]*desVel[2]))/(2*velUpperBound);
-	speedPer=hand_velocity_filtered.norm()/(velUpperBound);
+	speedPer=hand_velocity_filtered.norm()/(hand_velUpperBound-0.2);
 
 	return desVel;
 
 }
 
 
+double Hand2RobotSpeed(double handspeed){
+
+	double y1=((robot_velUpperBound+robot_velLowerBound)/2)+((robot_velUpperBound-robot_velLowerBound)/2)*std::tanh((handspeed-((hand_velUpperBound+hand_velLowerBound)/2))*(6/(hand_velUpperBound-hand_velLowerBound)));
+
+	double y2=alpha*+beta;
+
+	double y=(1-std::tanh(handspeed/((hand_velUpperBound+hand_velLowerBound)/2)))*y2+std::tanh(handspeed/((hand_velUpperBound+hand_velLowerBound)/2))*y1;
+
+	return y;
+
+}
+
+
+
 std::vector<double> compHandRelVel(){
 
 	std::vector<double> curVel(3,0);
 	std::vector<double> desVel(3,0);				// the desired velocity of the hand
+
+	//ee_speed=0;
+	double speed=0;
 
 
     MathLib::Vector hand_rel_velocity_mathlib;
@@ -522,12 +541,13 @@ std::vector<double> compHandRelVel(){
 	curVel[2]=hand_rel_velocity_mathlib(2);
 
 
-	double speed=std::sqrt(curVel[0]*curVel[0]+curVel[1]*curVel[1]+curVel[2]*curVel[2]);
+	speed=std::sqrt(curVel[0]*curVel[0]+curVel[1]*curVel[1]+curVel[2]*curVel[2]);
 
 	// map to the robot speed
 
-	double ee_speed=Hand2RobotSpeed(speed);
+	ee_speed=Hand2RobotSpeed(speed);
 	
+
 	if(speed>=velThreshold){
 
 		desVel[0]=vel_gain*ee_speed*curVel[0]/speed;
@@ -580,39 +600,28 @@ std::vector<double> compHandRelVel(){
 
 void computeLinearParameters_speed(){
 
-	Eigen::MAtrix2d A;
+	Eigen::Matrix2d A;
 	Eigen::Vector2d B;
 	Eigen::Vector2d Sol;
 
 	A << (hand_velUpperBound+hand_velLowerBound)/2, 1, 0.1, 1;
 
-	std::cout<<"A=\n "<< A <<"\n";
+	//std::cout<<"A=\n "<< A <<"\n";
 
 	B << (robot_velUpperBound+robot_velLowerBound)/2, 0.1;
 	
-	std::cout<<"B=\n "<< B <<"\n";
+	//std::cout<<"B=\n "<< B <<"\n";
 
 	Sol=A.colPivHouseholderQr().solve(B);
 
 	alpha=Sol(0);
 	beta=Sol(1);
 
-	std::cout<<"alpha= " << alpha << ", beta= " << beta <<"\n";
+	//std::cout<<"alpha= " << alpha << ", beta= " << beta <<"\n";
 
 }
 
 
-double Hand2RobotSpeed(double handspeed){
-
-	double y1=((robot_velUpperBound+robot_velLowerBound)/2)+((robot_velUpperBound-robot_velLowerBound)/2)*std::tahn((handspeed-((hand_velUpperBound+hand_velLowerBound)/2))*(6/(hand_velUpperBound-hand_velLowerBound)));
-
-	double y2=alpha*+beta;
-
-	double y=(1-std::tanh(handspeed/((hand_velUpperBound+hand_velLowerBound)/2)))*y2+std::tanh(handspeed/((hand_velUpperBound+hand_velLowerBound)/2))*y1;
-
-	return y;
-
-}
 
 
 int main(int argc, char **argv)
@@ -633,11 +642,11 @@ int main(int argc, char **argv)
 
     // set the subscribers to listen the classification outcome from the windows machine and the position of the hand
 
-    ros::Subscriber handSub=n.subscribe("hand/pose", 10, handListener);
+    ros::Subscriber handSub=n.subscribe("/hand/pose", 10, handListener);
 
     ros::Subscriber elbowSub=n.subscribe("elbow/pose", 10, elbowListener);
 
-    ros::Subscriber shoulderSub=n.subscribe("shoulder/pose", 10, shoulderListener);
+    ros::Subscriber shoulderSub=n.subscribe("/shoulder/pose", 10, shoulderListener);
 
     ros::Subscriber robotSub=n.subscribe("lwr/ee_pose", 10, robotListener);
 
@@ -650,6 +659,9 @@ int main(int argc, char **argv)
 
     ros::Publisher _pubVelTester=n.advertise<geometry_msgs::Twist>("/handtracker/tester/velocity", 10); 
 
+    ros::Publisher _pubSpeedTester=n.advertise<handtracker::spper>("/handtracker/tester/handspeed", 10); 
+
+
     ros::Publisher _pubPosTester=n.advertise<geometry_msgs::Twist>("/handtracker/tester/position", 10); 
 
 	ros::Publisher _pubSpeedPer=n.advertise<handtracker::spper>("/handtracker/speedPercentage", 10);  				// Publish the percentage of speed with respect to the maximum velocity"
@@ -661,6 +673,7 @@ int main(int argc, char **argv)
 	handtracker::spper speedMsg;
 
 	geometry_msgs::Twist _msgVelTester;
+	handtracker::spper _msgEeSpeedTester;
 	geometry_msgs::Twist _msgPosTester;
 
 
@@ -692,12 +705,15 @@ int main(int argc, char **argv)
 	// prev_hand_real_velocity(2)=0.0;
 
 	// spinonce for finding the initial position and velocity ot the hand
+
+	std::cout<<"okokokokookkkkkkkkkkkkkkkkkkkkk\n";
 	while(!_firstshoulderPoseReceived){
-		
+
 		ros::spinOnce();
 		loop_rate.sleep();
 	}
 	
+
 	// while(!_firsthandPoseReceived){
 		
 	// 	ros::spinOnce();
@@ -807,6 +823,9 @@ int main(int argc, char **argv)
     		speedMsg.sPer=speedPer;
     		speedMsg.dir=handDirection;
 
+    		_msgEeSpeedTester.sPer=ee_speed;
+    		_msgEeSpeedTester.dir=handDirection;
+
 
 
 
@@ -836,6 +855,8 @@ int main(int argc, char **argv)
 			_pubDesiredOrientation.publish(_msgDesiredOrientation);
 
 			_pubSpeedPer.publish(speedMsg);
+			_pubSpeedTester.publish(_msgEeSpeedTester);
+
 
 			// _msgVelTester.linear.x = hand_velocity_filtered(0);
    //  		_msgVelTester.linear.y = hand_velocity_filtered(1);
