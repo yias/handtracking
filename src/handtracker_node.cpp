@@ -7,9 +7,9 @@
 #include "geometry_msgs/Twist.h"
 #include "geometry_msgs/Quaternion.h"
 #include "handtracker/spper.h"
-#include "mathlib_eigen_conversions.h"
-#include "MotionGenerators/CDDynamics.h"
 
+#include "MotionGenerators/CDDynamics.h"
+#include "mathlib_eigen_conversions.h"
 
 #include <vector>
 #include <string>
@@ -24,12 +24,13 @@
 #include <termios.h>
 
 #include <math.h>  
-// #include <Eigen/Eigen>
+
 #include <Eigen/Eigen>
 #include <Eigen/Geometry>
 #include <Eigen/Dense>
 
 #include <iostream>
+#include "Utils.h"
 
 
 
@@ -48,13 +49,13 @@ double startTime;
 
 /*-- Variables related to the mocap system --*/
 
-double vel_gain=1.2;													// velocity gain
+double vel_gain=1.2;											// velocity gain
 
-double lookTW=0.1;	                                            // the timewindow to look back for the average velocity (in seconds)
+double lookTW=0.06;	                                            // the timewindow to look back for the average velocity (in seconds)
 double velThreshold=0.05;                                      // velocity threshold for destinguish the motion or no=motion of the hand
 
 double robot_velUpperBound=0.45;
-double robot_velLowerBound=0.1;								// 
+double robot_velLowerBound=0.1;									// 
 
 double hand_velUpperBound=0.8;
 double hand_velLowerBound=0.0;
@@ -67,6 +68,8 @@ double alpha,beta;
 float speedPer=0;
 float ee_speed=0;
 
+bool initOK=false;
+
 int mocapRate=120;                                              // the sample rate of the motion capture system
 
 
@@ -75,12 +78,58 @@ double a2=0.1;													// smoothing factor for the position
 
 
 
+// ----------------- variables for the robot base -----------------
 
+bool _firstKukaBasePoseReceived=false;
+double robotBaseStamp=0;
+
+Eigen::VectorXd robot_base_position(3);							// the position of the robot's base as received from the mocap system
+
+Eigen::VectorXd robot_base_position_filtered(3);				// the filtered position of the robot's base
+
+// helper variables for the filtering
+
+MathLib::Vector robot_base_position_filtered_mathlib;
+MathLib::Vector robot_base_velocity_filted_mathlib;
+
+CDDynamics *robot_base_pos_filter;								// the filter for the robot-base position
+
+
+// ----------------- variables for the object -----------------
+
+bool _firstObjectPoseReceived=false;
+double objectPoseStamp=0;
+float _objectZOffset=0.15f;
+float _objectYOffset=0.08f;
+
+Eigen::VectorXd object_position(3);								// the position of the object as received from the mocap system
+
+Eigen::VectorXd object_orientation(4);							// the orientation of the object as received from the mocap system
+
+Eigen::VectorXd object_position_filtered(3);						// the filtered position of object
+
+Eigen::VectorXd object_orientation_filtered(4);					// the filtered orientation of the object
+
+
+// helper variables for the filtering
+
+MathLib::Vector object_position_filtered_mathlib;
+MathLib::Vector object_velocity_filted_mathlib;
+
+MathLib::Vector object_orientation_filtered_mathlib;
+MathLib::Vector object_angular_vel_filted_mathlib;
+
+CDDynamics *object_position_filter, *object_orientation_filter;	// filters for the position and orientation of the object
+
+
+// ----------------- variables for the hand, elbow and shoulder -----------------
 
 unsigned int handCounter=0;                                     // counter for hand-related messages from the mocap system
 
 bool _firsthandPoseReceived=false;
 double handStamp=0;
+
+
 std::vector<double> handPosition(3,0);                          // vector for the position of the hand (in)
 std::vector<double> handOrientation(4,0);                       // vector for the orientation of the hand (in quaternions)
 std::vector<double> handVelocity(3,0);                          // vector for the velocity of the hand (in m/s)
@@ -145,16 +194,34 @@ bool pub_true=false;
 bool _firstRealPoseReceived=false;
 geometry_msgs::Pose _msgRealPose;
 
-Eigen::Vector4f _qd; // Desired end effector quaternion (4x1)
 
+float _distance2Target;
 
 
 std::vector<double> mocapTime;                                   	// timestamp for the mocap system
 
 std::vector< std::vector<double> > handRelPos;
-std::vector< double > _omegad(3,0); 								// Desired angular velocity [rad/s] (3x1)
+Eigen::Vector3f _omegad; 								// Desired angular velocity [rad/s] (3x1)
 
 std::vector< double > velpreviousValue(3,0);
+
+
+
+// ------- motion variables --------------------- //
+Eigen::VectorXd _motionDirection; 			// Direction of motion (3x1)
+Eigen::VectorXd _obj2RobotFrame; 			// Direction of motion (3x1)
+Eigen::Vector4f _qd; // Desired end effector quaternion (4x1)
+Eigen::VectorXd _eePosition(3);
+Eigen::VectorXd initialPosition(3);
+bool motionOn=false;						// a variable to set the motion on (in case the hand valocity is larger than a threshold)
+float TARGET_TOLERANCE = 0.05f; 				// Tolerance radius for reaching a target [m]
+float _toolOffset=0.14f;
+
+
+
+Eigen::Matrix3f _wRb;
+Eigen::Vector4f _q;
+Eigen::Vector4f _q0;
 
 
 /*-- functions for the system --*/
@@ -170,15 +237,213 @@ void robotListener(const geometry_msgs::Pose::ConstPtr& msg){
 
 	_msgRealPose = *msg;
 
+	_eePosition << _msgRealPose.position.x, _msgRealPose.position.y, _msgRealPose.position.z;
+  	_q <<_msgRealPose.orientation.w,_msgRealPose.orientation.x,_msgRealPose.orientation.y,_msgRealPose.orientation.z;
+	_wRb = Utils::quaternionToRotationMatrix(_q);
+	// Eigen::Vector4d temp;
+	// temp=_wRb.cast
+
 	if(!_firstRealPoseReceived)
 	{
 		_firstRealPoseReceived = true;
-		_qd << _msgRealPose.orientation.w, _msgRealPose.orientation.x, _msgRealPose.orientation.y, _msgRealPose.orientation.z;
+		 _qd = _q;
+		_eePosition = _eePosition+_toolOffset*_wRb.col(2).cast <double> ();
+		_q0 = _q;
 		// std::cerr << _qd.transpose() << std::endl;
 		
 	}
+}
+
+void computeDesiredOrientation()
+{
+
+	// Compute rotation error between current orientation and plane orientation using Rodrigues' law
+	Eigen::Vector3f k;
+	Eigen::Vector3f ref;
+	Eigen::Vector3d temp;
+	temp = _obj2RobotFrame-_eePosition;
+	temp(2) = 0.0f;
+	temp.normalize();
+	ref = temp.cast<float>();
+	k = (_wRb.col(2)).cross(ref);
+	float c = (_wRb.col(2)).transpose()*ref;  
+	float s = k.norm();
+	k /= s;
+
+	Eigen::Matrix3f K;
+	K << Utils::getSkewSymmetricMatrix(k);
+
+	Eigen::Matrix3f Re;
+	if(fabs(s)< FLT_EPSILON)
+	{
+		Re = Eigen::Matrix3f::Identity();
+	}
+	else
+	{
+		Re = Eigen::Matrix3f::Identity()+s*K+(1-c)*K*K;
+	}
+
+	// Convert rotation error into axis angle representation
+	Eigen::Vector3f omega;
+	float angle;
+	Eigen::Vector4f qtemp = Utils::rotationMatrixToQuaternion(Re);
+	Utils::quaternionToAxisAngle(qtemp,omega,angle);
+
+	// Compute final quaternion on plane
+	Eigen::Vector4f qf = Utils::quaternionProduct(qtemp,_q);
+	_qd = qf;
+
+	// Perform quaternion slerp interpolation to progressively orient the end effector while approaching the plane
+	_qd = Utils::slerpQuaternion(_q0,qf,1.0f-std::tanh(3.0f*_distance2Target));
+	std::cerr << _wRb.col(2).transpose() << " " << ref.transpose() <<  std::endl;
+	std::cerr << _distance2Target << std::endl;
+	std::cerr << angle << std::endl;
+
+	// Compute needed angular velocity to perform the desired quaternion
+	Eigen::Vector4f qcurI, wq;
+	qcurI(0) = _q(0);
+	qcurI.segment(1,3) = -_q.segment(1,3);
+	wq = 5.0f*Utils::quaternionProduct(qcurI,_qd-_q);
+	Eigen::Vector3f omegaTemp = _wRb*wq.segment(1,3);
+	_omegad = omegaTemp; 
 
 }
+
+
+void robotBaseListener(const geometry_msgs::PoseStamped& mocapmsg){
+
+    /*-- Callback function for acquiring the position of the base of the robot arm --*/
+    
+
+	if(!_firstKukaBasePoseReceived)
+	{
+			
+			_firstKukaBasePoseReceived=true;
+
+			// extract position from the message
+		   	robot_base_position(0)=mocapmsg.pose.position.x;
+		    robot_base_position(1)=mocapmsg.pose.position.y;
+		    robot_base_position(2)=mocapmsg.pose.position.z;
+
+			// std::cout<<"Initial robot base pose received\n";
+			ROS_INFO("Initial robot base pose received\n");
+			
+			// update the stamp of the mocap system
+		    robotBaseStamp=mocapmsg.header.seq;
+		
+	}else{
+		if(mocapmsg.header.seq!=robotBaseStamp){
+
+			// extract position from the message
+			robot_base_position(0)=mocapmsg.pose.position.x;
+		    robot_base_position(1)=mocapmsg.pose.position.y;
+		    robot_base_position(2)=mocapmsg.pose.position.z;
+
+			if (initOK){
+				// filtering the robot base position:
+
+				// set the new position of the robot base
+				robot_base_pos_filter->SetTarget(E2M_v(robot_base_position));
+
+				// update the filter
+				robot_base_pos_filter->Update();
+
+				// get filtered positiono of the robot's base
+				robot_base_pos_filter->GetState(robot_base_position_filtered_mathlib, robot_base_velocity_filted_mathlib);
+				
+				// convert the filtered position from mathlib to Eigen
+				robot_base_position_filtered=M2E_v(robot_base_position_filtered_mathlib);
+
+				// update the stamp of the mocap system
+			    robotBaseStamp=mocapmsg.header.seq;
+	
+			}
+			
+		}
+	}
+
+
+    //ROS_INFO("I heard: [%d] messages from mocap\n", mocapCounter);
+}
+
+void objectListener(const geometry_msgs::PoseStamped& mocapmsg){
+
+    /*-- Callback function for acquiring the position of the base of the robot arm --*/
+    
+
+	if(!_firstObjectPoseReceived)
+	{
+			
+			_firstObjectPoseReceived=true;
+
+			// extract position from the message
+		   	object_position(0)=mocapmsg.pose.position.x;
+		    object_position(1)=mocapmsg.pose.position.y-_objectYOffset;
+		    object_position(2)=mocapmsg.pose.position.z-_objectZOffset;
+
+		    // extract orientation from the message
+		    object_orientation << mocapmsg.pose.orientation.w, mocapmsg.pose.orientation.x, mocapmsg.pose.orientation.y, mocapmsg.pose.orientation.z;
+
+			// std::cout<<"Initial object pose received\n";
+			ROS_INFO("Initial object pose received\n");
+
+			// update the stamp of the mocap system
+		    objectPoseStamp=mocapmsg.header.seq;
+		
+	}else{
+		if(mocapmsg.header.seq!=objectPoseStamp){
+
+			// extract position from the message
+			object_position(0)=mocapmsg.pose.position.x;
+		    object_position(1)=mocapmsg.pose.position.y-_objectYOffset;
+		    object_position(2)=mocapmsg.pose.position.z-_objectZOffset;
+
+		    // extract orientation from the message
+		    object_orientation << mocapmsg.pose.orientation.w, mocapmsg.pose.orientation.x, mocapmsg.pose.orientation.y, mocapmsg.pose.orientation.z;
+
+		    if (initOK){
+				// filtering the object's position:
+
+				// set the new position of the object
+				object_position_filter->SetTarget(E2M_v(object_position));
+
+				// update the filter
+				object_position_filter->Update();
+
+				// get filtered position of the objcet
+				object_position_filter->GetState(object_position_filtered_mathlib, object_velocity_filted_mathlib);
+				
+				// convert the filtered position from mathlib to Eigen
+				object_position_filtered=M2E_v(object_position_filtered_mathlib);
+
+
+				// filtering the object's orientation:
+
+				// set the new orientation of the object in the filter
+				object_orientation_filter->SetTarget(E2M_v(object_orientation));
+
+				// update the filter
+				object_orientation_filter->Update();
+
+				// get filtered orientation of the objcet
+				object_position_filter->GetState(object_orientation_filtered_mathlib, object_angular_vel_filted_mathlib);
+
+				// convert the filtered position from mathlib to Eigen
+				object_orientation_filtered=M2E_v(object_orientation_filtered_mathlib);
+
+				// update the stamp of the mocap system
+			    objectPoseStamp=mocapmsg.header.seq;
+		    }
+
+			
+
+		}
+	}
+
+
+    //ROS_INFO("I heard: [%d] messages from mocap\n", mocapCounter);
+}
+
 
 
 void handListener(const geometry_msgs::PoseStamped& mocapmsg){
@@ -240,8 +505,6 @@ void handListener(const geometry_msgs::PoseStamped& mocapmsg){
 		    handPrevOrientation[2]=handOrientation[2];
 		    handPrevOrientation[3]=handOrientation[3];
 			
-			
-
 		    handStamp=mocapmsg.header.seq;
 
 		}
@@ -299,8 +562,6 @@ void shoulderListener(const geometry_msgs::PoseStamped& mocapmsg){
 			
 			_firstshoulderPoseReceived=true;
 
-
-
 		   	shoulderPosition[0]=mocapmsg.pose.position.x;
 		    shoulderPosition[1]=mocapmsg.pose.position.y;
 		    shoulderPosition[2]=mocapmsg.pose.position.z;
@@ -343,11 +604,6 @@ void shoulderListener(const geometry_msgs::PoseStamped& mocapmsg){
 		}
 	}
 
-
- 
-
- 
-
     shoulderCounter++;
 }
 
@@ -378,27 +634,26 @@ std::vector<double> handRV(std::vector< std::vector<double> > handrpos){
 	hrv[2]=hrv[2]/(int)handrpos.size();
 
 
-	// // filtering the velocity
-	// hand_real_vel_filter->SetTarget(E2M_v(human_hand_real_velocity_world));
-	// hand_real_vel_filter->Update();
-	// hand_real_vel_filter->GetState(human_hand_real_velocity_root_filtered_mathlib, human_hand_real_acceleration_root_mathlib);
-	// hand_velocity_filtered = M2E_v(human_hand_real_velocity_root_filtered_mathlib);
-
 
 	current_shdistance=current_shdistance/(int)handrpos.size();
 
+	std:cout<<"hrv: " << hrv[0] << ", " << hrv[1] << ", " << hrv[2] <<"\n";
+
 	if(!(_firstdistance)){
 		_firstdistance=true;
-		previous_shdistance=current_shdistance;
+		// previous_shdistance=current_shdistance;
 		handDirection=0;
 	}else{
-		if(current_shdistance>previous_shdistance){
-			handDirection=1;
+
+		if(std::fabs(hrv[0])<0.05){
+			// handDirection=0;
 		}else{
-			if(current_shdistance<previous_shdistance){
-				handDirection=-1;
+			if(hrv[0]>0){
+				std::cout<<"testokkkkkkkkkkkkkkkkkkkkk111111111111111111111111111111111111111111111111111111111\n";
+			handDirection=1;
 			}else{
-				handDirection=0;
+				handDirection=-1;
+				std::cout<<"testokkkkkkkkkkkkkkkkkkkkk22222222222222222222222222222222222222222222222222222222222222\n";
 			}
 		}
 	}
@@ -415,8 +670,6 @@ std::vector<double> handRP(std::vector<double> handPos, std::vector<double> shou
 
 	std::vector<double> hrp(3,0);				// the relative velocity of the hand
 
-
-
 	hrp[0]=handPos[0]-shoulderPos[0];
 	hrp[1]=handPos[1]-shoulderPos[1];
 	hrp[2]=handPos[2]-shoulderPos[2];
@@ -430,36 +683,39 @@ std::vector<double> handRP(std::vector<double> handPos, std::vector<double> shou
 	}
 
 	
+	if (initOK){
+		Eigen::VectorXd human_hand_position_world(3);
+	    Eigen::VectorXd human_hand_real_velocity_world(3);
 
-	Eigen::VectorXd human_hand_position_world(3);
-    Eigen::VectorXd human_hand_real_velocity_world(3);
-
-    MathLib::Vector human_hand_position_world_filtered_mathlib;
-    MathLib::Vector human_hand_real_velocity_world_mathlib;
-    MathLib::Vector human_hand_real_velocity_root_filtered_mathlib;
-    MathLib::Vector human_hand_real_acceleration_root_mathlib;
+	    MathLib::Vector human_hand_position_world_filtered_mathlib;
+	    MathLib::Vector human_hand_real_velocity_world_mathlib;
+	    MathLib::Vector human_hand_real_velocity_root_filtered_mathlib;
+	    MathLib::Vector human_hand_real_acceleration_root_mathlib;
 
 
-	human_hand_position_world(0)=hrp[0];
-	human_hand_position_world(1)=hrp[1];
-	human_hand_position_world(2)=hrp[2];
+		human_hand_position_world(0)=hrp[0];
+		human_hand_position_world(1)=hrp[1];
+		human_hand_position_world(2)=hrp[2];
 
-	//std::cout<<"m current real hand position: " << human_hand_position_world(0) << ", " << human_hand_position_world(1) << ", " << human_hand_position_world(2) <<" \n";
-		    
-	// filtering the hand position
-	hand_pos_filter->SetTarget(E2M_v(human_hand_position_world));
+		//std::cout<<"m current real hand position: " << human_hand_position_world(0) << ", " << human_hand_position_world(1) << ", " << human_hand_position_world(2) <<" \n";
+			    
+		// filtering the hand position
+		hand_pos_filter->SetTarget(E2M_v(human_hand_position_world));
 
+
+		
+		hand_pos_filter->Update();
+		hand_pos_filter->GetState(human_hand_position_world_filtered_mathlib, human_hand_real_velocity_world_mathlib);
+		cuur_hand_rev_velocity_filtered = M2E_v(human_hand_real_velocity_world_mathlib);
+		curr_hand_rev_position_filtered=M2E_v(human_hand_position_world_filtered_mathlib);
+
+
+		hrp[0]=curr_hand_rev_position_filtered(0);
+		hrp[1]=curr_hand_rev_position_filtered(1);
+		hrp[2]=curr_hand_rev_position_filtered(2);
+	}
 
 	
-	hand_pos_filter->Update();
-	hand_pos_filter->GetState(human_hand_position_world_filtered_mathlib, human_hand_real_velocity_world_mathlib);
-	cuur_hand_rev_velocity_filtered = M2E_v(human_hand_real_velocity_world_mathlib);
-	curr_hand_rev_position_filtered=M2E_v(human_hand_position_world_filtered_mathlib);
-
-
-	hrp[0]=curr_hand_rev_position_filtered(0);
-	hrp[1]=curr_hand_rev_position_filtered(1);
-	hrp[2]=curr_hand_rev_position_filtered(2);
 
 	//std::cout<<"current filtered hand position: " << hrp[0] << ", " << hrp[1] << ", " << hrp[2] <<" \n";
 
@@ -469,34 +725,46 @@ std::vector<double> handRP(std::vector<double> handPos, std::vector<double> shou
 
 std::vector<double> compDesiredVel(std::vector<double> curVel){
 
+
+
 	std::vector<double> desVel(3,0);				// the desired velocity of the hand
 
-	double speed=std::sqrt(curVel[0]*curVel[0]+curVel[1]*curVel[1]+curVel[2]*curVel[2]);
+	_obj2RobotFrame=object_position_filtered-robot_base_position_filtered;
 
-	if(!(speed<=velThreshold)){
-
-		if(speed>1){
-			desVel[0]=velpreviousValue[0];
-			desVel[1]=velpreviousValue[1];
-			desVel[2]=velpreviousValue[2];
-
-		}else{
-			desVel[0]=vel_gain*((1-a)*velpreviousValue[0]+a*(hand_velUpperBound*curVel[0]/speed))/2;
-			desVel[1]=vel_gain*((1-a)*velpreviousValue[1]+a*(hand_velUpperBound*curVel[1]/speed))/2;
-			desVel[2]=vel_gain*((1-a)*velpreviousValue[2]+a*(hand_velUpperBound*curVel[2]/speed))/2;
-
-			// speedPer=(std::sqrt(desVel[0]*desVel[0]+desVel[1]*desVel[1]+desVel[2]*desVel[2]))/(2*velUpperBound);
-
-			velpreviousValue[0]=desVel[0];
-			velpreviousValue[1]=desVel[1];
-			velpreviousValue[2]=desVel[2];
-		}
-
+	_motionDirection=_obj2RobotFrame-_eePosition;
+	if (handDirection<0.0){
+		_motionDirection=initialPosition-_eePosition;
 	}
+	_motionDirection.normalize();
 
-	//speedPer=(std::sqrt(desVel[0]*desVel[0]+desVel[1]*desVel[1]+desVel[2]*desVel[2]))/(2*velUpperBound);
-	//speedPer=(std::sqrt(desVel[0]*desVel[0]+desVel[1]*desVel[1]+desVel[2]*desVel[2]))/(2*velUpperBound);
-	speedPer=hand_velocity_filtered.norm()/(hand_velUpperBound-0.2);
+
+
+	if (!motionOn){
+
+		// Go in pause state
+		desVel[0]=0.0f;
+		desVel[1]=0.0f;
+		desVel[2]=0.0f;;
+
+
+	}else{
+		desVel[0]=ee_speed*_motionDirection(0);
+		desVel[1]=ee_speed*_motionDirection(1);
+		desVel[2]=ee_speed*_motionDirection(2);
+
+		// Compute distance to target
+		_distance2Target = (_obj2RobotFrame-_eePosition).norm();
+		if(_distance2Target < TARGET_TOLERANCE){
+
+			// Go in pause state
+			desVel[0]=0.0f;
+			desVel[1]=0.0f;
+			desVel[2]=0.0f;;
+
+		}
+	}
+	
+	
 
 	return desVel;
 
@@ -534,7 +802,7 @@ std::vector<double> compHandRelVel(){
 	hand_real_vel_filter->SetTarget(E2M_v(cuur_hand_rev_velocity_filtered));
 	hand_real_vel_filter->Update();
 	hand_real_vel_filter->GetState(hand_rel_velocity_mathlib, hand_rel_acceleration_mathlib);
-	//hand_velocity_filtered = M2E_v(hand_rel_velocity_mathlib);
+	hand_velocity_filtered = M2E_v(hand_rel_velocity_mathlib);
 
 	curVel[0]=hand_rel_velocity_mathlib(0);
 	curVel[1]=hand_rel_velocity_mathlib(1);
@@ -550,6 +818,7 @@ std::vector<double> compHandRelVel(){
 
 	if(speed>=velThreshold){
 
+		motionOn=true;
 		desVel[0]=vel_gain*ee_speed*curVel[0]/speed;
 		desVel[1]=vel_gain*ee_speed*curVel[1]/speed;
 		desVel[2]=vel_gain*ee_speed*curVel[2]/speed;
@@ -565,7 +834,7 @@ std::vector<double> compHandRelVel(){
 	
 	std::cout<< "dif" << ee_speed-std::sqrt(desVel[0]*desVel[0]+desVel[1]*desVel[1]+desVel[2]*desVel[2]) << "\n";
 
-
+	speedPer=hand_velocity_filtered.norm()/(hand_velUpperBound-0.2);
 
 	// if(!(speed<=velThreshold)){
 
@@ -650,6 +919,10 @@ int main(int argc, char **argv)
 
     ros::Subscriber shoulderSub=n.subscribe("/shoulder/pose", 10, shoulderListener);
 
+    ros::Subscriber objectSub=n.subscribe("/object/pose", 10, objectListener);
+
+    ros::Subscriber robotBaseSub=n.subscribe("/robotBase/pose", 10, robotBaseListener);
+
     ros::Subscriber robotSub=n.subscribe("lwr/ee_pose", 10, robotListener);
 
 
@@ -696,6 +969,7 @@ int main(int argc, char **argv)
 
 	computeLinearParameters_speed();
 
+	_omegad.setConstant(0.0f);
 
 	// set initial position and velocity to zero
 	// prev_hand_position(0)=0.0;
@@ -708,13 +982,17 @@ int main(int argc, char **argv)
 
 	// spinonce for finding the initial position and velocity ot the hand
 
-	std::cout<<"okokokokookkkkkkkkkkkkkkkkkkkkk\n";
+	
 	while(!_firstshoulderPoseReceived){
 
+		while(!_firsthandPoseReceived){
+			ros::spinOnce();
+			loop_rate.sleep();	
+		}
 		ros::spinOnce();
 		loop_rate.sleep();
 	}
-	
+
 
 	// while(!_firsthandPoseReceived){
 		
@@ -743,7 +1021,7 @@ int main(int argc, char **argv)
 
 	double wn_filter_position, wn_filter_velocity, wn_filter_c, dt, dim,sample_time;
     wn_filter_position = 10.0;
-    wn_filter_velocity = 30.0;//30
+    wn_filter_velocity = 200.0;//30
 	wn_filter_c = 25.0;
 	dt = (1.0/mocapRate);
     dim = 3;
@@ -761,6 +1039,28 @@ int main(int argc, char **argv)
 	shoulder_pos_filter->SetStateTarget(E2M_v(prev_hand_position), E2M_v(prev_hand_position));
 
 	hand_real_vel_filter->SetStateTarget(E2M_v(prev_hand_real_velocity), E2M_v(prev_hand_real_velocity));
+
+	// robot-base's position filter
+	robot_base_pos_filter= new  CDDynamics(dim, sample_time, wn_filter_position);
+
+	robot_base_pos_filter->SetStateTarget(E2M_v(robot_base_position), E2M_v(prev_hand_position));
+
+	// object's position filter
+	object_position_filter= new  CDDynamics(dim, sample_time, wn_filter_position);
+
+	object_position_filter->SetStateTarget(E2M_v(object_position), E2M_v(object_position));
+
+	// object's orientation filter
+	object_orientation_filter= new  CDDynamics(4, sample_time, wn_filter_position);
+
+	object_orientation_filter->SetStateTarget(E2M_v(object_orientation), E2M_v(object_orientation));
+
+	initialPosition<< -0.47225f, 0.0f, 0.2847f;
+
+
+	initOK=true;
+
+
 
     int count = 0;
 
@@ -813,14 +1113,27 @@ int main(int argc, char **argv)
 		// _pubVelTester.publish(_msgVelTester);
 
 
-    	if(currentTime-checkTime>=lookTW){
+    	 if(currentTime-checkTime>=lookTW){
     		currentVel=handRV(handRelPos);
+
+    		// remove the oldest relative position
+    		handRelPos.clear();
+
+    		// update checking time
+    		checkTime=ros::Time::now().toSec();
+    	}
+
+    		
 
     		currentVel2=compHandRelVel();
     		//std::cout<<"current vel: " << currentVel[0] << ", " << currentVel[1] << ", " << currentVel[2] << " sp: " << std::sqrt(currentVel[0]*currentVel[0]+currentVel[1]*currentVel[1]+currentVel[2]*currentVel[2]) << "\n"; 
     		
+    		
+
 
     		desiredVel=compDesiredVel(currentVel);
+
+    		computeDesiredOrientation();
 
     		speedMsg.sPer=speedPer;
     		speedMsg.dir=handDirection;
@@ -832,16 +1145,16 @@ int main(int argc, char **argv)
 
 
 
-    		_msgDesiredTwist.linear.x  = currentVel2[0];
-			_msgDesiredTwist.linear.y  = currentVel2[1];
-			_msgDesiredTwist.linear.z  = currentVel2[2];
+   //  		_msgDesiredTwist.linear.x  = -currentVel2[0];
+			// _msgDesiredTwist.linear.y  = currentVel2[1];
+			// _msgDesiredTwist.linear.z  = currentVel2[2];
 			_msgDesiredTwist.angular.x = _omegad[0];
 			_msgDesiredTwist.angular.y = _omegad[1];
 			_msgDesiredTwist.angular.z = _omegad[2];
 
-			// _msgDesiredTwist.linear.x  = desiredVel[0];
-			// _msgDesiredTwist.linear.y  = desiredVel[1];
-			// _msgDesiredTwist.linear.z  = desiredVel[2];
+			_msgDesiredTwist.linear.x  = desiredVel[0];
+			_msgDesiredTwist.linear.y  = desiredVel[1];
+			_msgDesiredTwist.linear.z  = desiredVel[2];
 			// _msgDesiredTwist.angular.x = _omegad[0];
 			// _msgDesiredTwist.angular.y = _omegad[1];
 			// _msgDesiredTwist.angular.z = _omegad[2];
@@ -863,7 +1176,7 @@ int main(int argc, char **argv)
 			// _msgVelTester.linear.x = hand_velocity_filtered(0);
    //  		_msgVelTester.linear.y = hand_velocity_filtered(1);
 	  //   	_msgVelTester.linear.z = hand_velocity_filtered(2);
-			currentVel2=compHandRelVel();
+			// currentVel2=compHandRelVel();
 			_msgVelTester.linear.x = currentVel2[0];
     		_msgVelTester.linear.y = currentVel2[1];
 	    	_msgVelTester.linear.z = currentVel2[2];
@@ -874,14 +1187,10 @@ int main(int argc, char **argv)
 			_pubVelTester.publish(_msgVelTester);
 	    	
 
-    		// remove the oldest relative position
-    		handRelPos.clear();
+    		
+    		
 
-
-    		// update checking time
-    		checkTime=ros::Time::now().toSec();
-
-    	}
+    	// }
 
 
     	// std::cout<<"--------------------------------------------------------------------\n";
@@ -905,6 +1214,27 @@ int main(int argc, char **argv)
         ++count;
     }
 
+
+	_msgDesiredTwist.linear.x  = 0.0f;
+	_msgDesiredTwist.linear.y  = 0.0f;
+	_msgDesiredTwist.linear.z  =0.0f;
+	_msgDesiredTwist.angular.x = 0.0f;
+	_msgDesiredTwist.angular.y = 0.0f;
+	_msgDesiredTwist.angular.z = 0.0f;
+
+	_pubDesiredTwist.publish(_msgDesiredTwist);
+
+	// Publish desired orientation
+	_msgDesiredOrientation.w = _qd(0);
+	_msgDesiredOrientation.x = _qd(1);
+	_msgDesiredOrientation.y = _qd(2);
+	_msgDesiredOrientation.z = _qd(3);
+
+	_pubDesiredOrientation.publish(_msgDesiredOrientation);
+
+	ros::spinOnce();
+
+	loop_rate.sleep();
 
     return 0;
 }

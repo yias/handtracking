@@ -17,6 +17,7 @@ find_package(catkin REQUIRED COMPONENTS
   sensor_msgs
   message_generation
   motion_generators
+  utils
 )
 
 find_package(Eigen3 REQUIRED)
@@ -117,7 +118,7 @@ generate_messages(
 catkin_package(
   #INCLUDE_DIRS include
   LIBRARIES handtracker
-  CATKIN_DEPENDS roscpp std_msgs
+  CATKIN_DEPENDS roscpp std_msgs utils
   DEPENDS system_lib Eigen3
 )
 
