@@ -1164,6 +1164,10 @@ int main(int argc, char **argv)
     
     }
 
+    _outputFile.close();
+
+	ROS_INFO("The data are saved to %s \n",("src/handtracker/" + fileName + ".txt").c_str());
+
 
 	_msgDesiredTwist.linear.x  = 0.0f;
 	_msgDesiredTwist.linear.y  = 0.0f;
@@ -1186,7 +1190,7 @@ int main(int argc, char **argv)
 
 	loop_rate.sleep();
 
-	_outputFile.close();
+
 
     return 0;
 }
