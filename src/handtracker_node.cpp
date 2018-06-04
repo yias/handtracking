@@ -30,6 +30,7 @@
 #include <Eigen/Dense>
 
 #include <iostream>
+#include <fstream>
 #include "Utils.h"
 
 
@@ -45,6 +46,9 @@ int sRate=100;                                                   // set the samp
 int trialCounter=0;                                              // counter for the trials
 double startTime;
 
+std::ofstream _outputFile;    									// stream object to store the log data
+std::string fileName;											// name of the log-file
+bool saveData=true;
 
 
 /*-- Variables related to the mocap system --*/
@@ -55,7 +59,7 @@ double lookTW=0.06;	                                            // the timewindo
 double velThreshold=0.05;                                      // velocity threshold for destinguish the motion or no=motion of the hand
 
 double robot_velUpperBound=0.45;
-double robot_velLowerBound=0.1;									// 
+double robot_velLowerBound=0.05;									// 
 
 double hand_velUpperBound=0.8;
 double hand_velLowerBound=0.0;
@@ -139,6 +143,8 @@ std::vector<double> handPrevOrientation(4,0);                   // vector for th
 
 CDDynamics *hand_pos_filter, *hand_real_vel_filter;
 
+Eigen::VectorXd hand_revPosition(3);
+
 Eigen::VectorXd prev_hand_position(3);
 
 Eigen::VectorXd curr_hand_position_filtered(3);
@@ -147,10 +153,32 @@ Eigen::VectorXd prev_hand_real_velocity(3);
 
 Eigen::VectorXd hand_velocity_filtered(3);
 
+bool _firstHandRP=false;
+
+//------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
+
 unsigned int elbowCounter=0;                                    // counter for elbow-related messages from the mocap system
-std::vector<double> elbowPosition(3,0);                         // vector for the position of the elbow (in)
-std::vector<double> elbowOrientation(4,0);                      // vector for the orientation of the elbow (in quaternions)
+
+Eigen::Vector3d elbowPosition;                         			// vector for the position of the elbow as receieved from the mocap system(in m)
+Eigen::Vector4d elbowOrientation;                      			// vector for the orientation of the elbow as receieved from the mocap system (in quaternions)
 std::vector<double> elbowVelocity(3,0);                         // vector for the velocity of the elbow (in m/s)
+
+CDDynamics *elbow_pos_filter, *elbow_real_vel_filter;			// position and velocity filters for the elbow
+
+Eigen::VectorXd elbow_revPosition(3);							// the elbow position with respect to the shoulder
+
+Eigen::VectorXd elbow_revPosition_filtered(3);					// the filtered elbow position with respect to the shoulder
+
+Eigen::VectorXd elbow_revPvelocity(3);							// the elbow velocity with respect to the shoulder
+
+Eigen::VectorXd elbow_revPvelocity_filtered(3);					// the filtered elbow velocity with respect to the shoulder
+
+MathLib::Vector elbow_position_filtered_mathlib;				// helper variable for the fintering
+MathLib::Vector elbow_real_velocity_mathlib;					// helper variable for the fintering
+
+bool _firstElbowRP=false;										// a boolian variable for checking if the first relative position has reveiced (used for the purpose of fintering)
+
+//------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
 
 unsigned int shoulderCounter=0;                                 // counter for shoulder-related messages from the mocap system
 
@@ -185,7 +213,8 @@ float handDirection=0;
 
 
 
-bool _firstHandRP=false;
+
+
 
 
 
@@ -295,9 +324,9 @@ void computeDesiredOrientation()
 
 	// Perform quaternion slerp interpolation to progressively orient the end effector while approaching the plane
 	_qd = Utils::slerpQuaternion(_q0,qf,1.0f-std::tanh(3.0f*_distance2Target));
-	std::cerr << _wRb.col(2).transpose() << " " << ref.transpose() <<  std::endl;
-	std::cerr << _distance2Target << std::endl;
-	std::cerr << angle << std::endl;
+	// std::cerr << _wRb.col(2).transpose() << " " << ref.transpose() <<  std::endl;
+	// std::cerr << _distance2Target << std::endl;
+	// std::cerr << angle << std::endl;
 
 	// Compute needed angular velocity to perform the desired quaternion
 	Eigen::Vector4f qcurI, wq;
@@ -458,10 +487,6 @@ void handListener(const geometry_msgs::PoseStamped& mocapmsg){
     MathLib::Vector human_hand_real_velocity_root_filtered_mathlib;
     MathLib::Vector human_hand_real_acceleration_root_mathlib;
 
-   
-
-    
-
 	if(!_firsthandPoseReceived)
 	{
 			
@@ -525,14 +550,14 @@ void elbowListener(const geometry_msgs::PoseStamped& mocapmsg){
 
     /*-- Callback function for subscriber of the mocap system --*/
 
-    elbowPosition[0]=mocapmsg.pose.position.x;
-    elbowPosition[1]=mocapmsg.pose.position.y;
-    elbowPosition[2]=mocapmsg.pose.position.z;
+    elbowPosition(0)=mocapmsg.pose.position.x;
+    elbowPosition(1)=mocapmsg.pose.position.y;
+    elbowPosition(2)=mocapmsg.pose.position.z;
 
-    elbowOrientation[0]=mocapmsg.pose.orientation.x;
-    elbowOrientation[1]=mocapmsg.pose.orientation.y;
-    elbowOrientation[2]=mocapmsg.pose.orientation.z;
-    elbowOrientation[3]=mocapmsg.pose.orientation.w;
+    elbowOrientation(0)=mocapmsg.pose.orientation.x;
+    elbowOrientation(1)=mocapmsg.pose.orientation.y;
+    elbowOrientation(2)=mocapmsg.pose.orientation.z;
+    elbowOrientation(3)=mocapmsg.pose.orientation.w;
 
 
     //mocapTime.push_back((ros::Time::now().toSec())-startTime);
@@ -552,10 +577,6 @@ void shoulderListener(const geometry_msgs::PoseStamped& mocapmsg){
     MathLib::Vector shoulder_real_velocity_mathlib;
     MathLib::Vector shoulder_velocity_filtered_mathlib;
     MathLib::Vector shoulder_acceleration_mathlib;
-
-
-    
-
 
 	if(!_firstshoulderPoseReceived)
 		{
@@ -637,7 +658,7 @@ std::vector<double> handRV(std::vector< std::vector<double> > handrpos){
 
 	current_shdistance=current_shdistance/(int)handrpos.size();
 
-	std:cout<<"hrv: " << hrv[0] << ", " << hrv[1] << ", " << hrv[2] <<"\n";
+	// std:cout<<"hrv: " << hrv[0] << ", " << hrv[1] << ", " << hrv[2] <<"\n";
 
 	if(!(_firstdistance)){
 		_firstdistance=true;
@@ -649,11 +670,9 @@ std::vector<double> handRV(std::vector< std::vector<double> > handrpos){
 			// handDirection=0;
 		}else{
 			if(hrv[0]>0){
-				std::cout<<"testokkkkkkkkkkkkkkkkkkkkk111111111111111111111111111111111111111111111111111111111\n";
 			handDirection=1;
 			}else{
 				handDirection=-1;
-				std::cout<<"testokkkkkkkkkkkkkkkkkkkkk22222222222222222222222222222222222222222222222222222222222222\n";
 			}
 		}
 	}
@@ -720,6 +739,42 @@ std::vector<double> handRP(std::vector<double> handPos, std::vector<double> shou
 	//std::cout<<"current filtered hand position: " << hrp[0] << ", " << hrp[1] << ", " << hrp[2] <<" \n";
 
 	return hrp;
+}
+
+
+Eigen::Vector3d elbowRP(){
+
+
+/*-- a function to calculate the position of the elbow with respect to the shoulder --*/
+
+	Eigen::Vector3d Erp;							// the relative position of the elbow
+
+	Erp(0)=elbowPosition(0)-shoulderPosition[0];
+	Erp(1)=elbowPosition(1)-shoulderPosition[1];
+	Erp(2)=elbowPosition(2)-shoulderPosition[2];
+	
+
+	if(!_firstElbowRP){
+		
+		_firstElbowRP=true;
+		return Erp;
+	}
+
+	
+	if (initOK){
+
+			    
+		//	filtering the elbow position
+		elbow_pos_filter->SetTarget(E2M_v(Erp));
+		elbow_pos_filter->Update();
+		elbow_pos_filter->GetState(elbow_position_filtered_mathlib, elbow_real_velocity_mathlib);
+		elbow_revPosition_filtered=M2E_v(elbow_position_filtered_mathlib);
+		elbow_revPvelocity=M2E_v(elbow_real_velocity_mathlib);
+
+	}
+
+
+	return Erp;
 }
 
 
@@ -832,7 +887,7 @@ std::vector<double> compHandRelVel(){
 	}
 
 	
-	std::cout<< "dif" << ee_speed-std::sqrt(desVel[0]*desVel[0]+desVel[1]*desVel[1]+desVel[2]*desVel[2]) << "\n";
+	// std::cout<< "dif" << ee_speed-std::sqrt(desVel[0]*desVel[0]+desVel[1]*desVel[1]+desVel[2]*desVel[2]) << "\n";
 
 	speedPer=hand_velocity_filtered.norm()/(hand_velUpperBound-0.2);
 
@@ -890,6 +945,17 @@ void computeLinearParameters_speed(){
 
 	//std::cout<<"alpha= " << alpha << ", beta= " << beta <<"\n";
 
+}
+
+int saveData2File(std::ofstream& optF,double ctTime,Eigen::VectorXd _eePos,Eigen::Vector4f _oriPose,float eeS, std::vector<double> dVel,float handDir,std::vector<double> _handRP,Eigen::VectorXd handRP_filtered, Eigen::VectorXd _handRV, Eigen::VectorXd handRV_filtered,Eigen::Vector3d eRP,Eigen::Vector3d eRP_filtered,Eigen::Vector3d elbow_revVel){
+
+	if (optF.is_open()){
+		optF << ctTime << " " << _eePos(0) << " " << _eePos(1) << " " << _eePos(2) << " " << _oriPose(0) << " " << _oriPose(1) << " " << _oriPose(2) << " " << _oriPose(3) << " " <<  eeS << " " << dVel[0] << " " << dVel[1] << " " << dVel[2] << " " << handDir << " " << _handRP[0] << " " << _handRP[1] << " " << _handRP[2] <<  " " << handRP_filtered[0] << " " << handRP_filtered[1] << " " << handRP_filtered[2] << " " << _handRV[0] << " " << _handRV[1] << " " << _handRV[2] <<  " " << handRV_filtered[0] << " " << handRV_filtered[1] << " " << handRV_filtered[2] << " " << eRP[0] << " " << eRP[1] << " " << eRP[2] << " " << eRP_filtered[0] << " " << eRP_filtered[1] << " " << eRP_filtered[2] << " " << elbow_revVel[0] << " " << elbow_revVel[1] << " " << elbow_revVel[2] << std::endl;	
+		return 1;
+	}else{
+		return 0;
+	}
+		
 }
 
 
@@ -1001,7 +1067,6 @@ int main(int argc, char **argv)
 	// }
 	
 	std::vector <double> initPos=handRP(handPosition,shoulderPosition);
-	
 
 	// std::vector <double> initVel=compHandRelVel();
 
@@ -1010,8 +1075,6 @@ int main(int argc, char **argv)
 	prev_hand_position(0)=initPos[0];
 	prev_hand_position(1)=initPos[1];
 	prev_hand_position(2)=initPos[2];
-
-	std::cout<<"prev_hand_position: " << prev_hand_position << "\n";
 
 	prev_hand_real_velocity(0)=0.0;
 	prev_hand_real_velocity(1)=0.0;
@@ -1040,6 +1103,19 @@ int main(int argc, char **argv)
 
 	hand_real_vel_filter->SetStateTarget(E2M_v(prev_hand_real_velocity), E2M_v(prev_hand_real_velocity));
 
+
+	// elbow filters
+
+	Eigen::Vector3d initElbowPos;
+	initElbowPos=elbowRP();
+
+	elbow_pos_filter = new CDDynamics(dim, sample_time, wn_filter_position);
+
+	// elbow_vel_filter = new CDDynamics(dim, sample_time, wn_filter_velocity);
+
+	elbow_pos_filter->SetStateTarget(E2M_v(initElbowPos), E2M_v(initElbowPos));
+
+
 	// robot-base's position filter
 	robot_base_pos_filter= new  CDDynamics(dim, sample_time, wn_filter_position);
 
@@ -1055,8 +1131,22 @@ int main(int argc, char **argv)
 
 	object_orientation_filter->SetStateTarget(E2M_v(object_orientation), E2M_v(object_orientation));
 
+
+
+
+
+
 	initialPosition<< -0.47225f, 0.0f, 0.2847f;
 
+	fileName="Logfile_HT";
+
+	// _outputFile = std::ofstream(fileName + ".txt");
+
+	_outputFile.open(("src/handtracker/" + fileName + ".txt").c_str());
+
+	std::vector<double> tmpHandRP(3,0);
+
+	Eigen::Vector3d tmpElbowRP;
 
 	initOK=true;
 
@@ -1068,21 +1158,14 @@ int main(int argc, char **argv)
     while (ros::ok())
     {
         
-        
-
-        
-
-        // if the key 't' is pressed, save the data and clear the data for the next trial
-
-        // if(getch_()=='t'){
-        //     saveRecordings();
-
-        // }
-    	// std::cout<<"--------------------------------------------------------------------\n";
-    	
+	
     	currentTime=ros::Time::now().toSec();
 
-    	handRelPos.push_back(handRP(handPosition,shoulderPosition));
+    	tmpHandRP=handRP(handPosition,shoulderPosition);
+    	tmpElbowRP=elbowRP();
+
+
+    	handRelPos.push_back(tmpHandRP);
 
 
     	_msgPosTester.linear.x = curr_hand_rev_position_filtered(0);
@@ -1093,24 +1176,6 @@ int main(int argc, char **argv)
 		_msgPosTester.angular.z = _omegad[2];
 
     	_pubPosTester.publish(_msgPosTester);
-    	
-    	// std::cout<<"size of handRePos: " << (int)handRelPos.size()<<"\n";
-
-    	// std::cout<< "time passed: " << currentTime - checkTime<< "\n";
-
-    	//currentVel2=compHandRelVel();
-
-		// _msgVelTester.linear.x = currentVel2[0];
-  		// _msgVelTester.linear.y = currentVel2[1];
-	 	// _msgVelTester.linear.z = currentVel2[2];
-	    // _msgVelTester.linear.x = hand_velocity_filtered(0);
-    	// _msgVelTester.linear.y = hand_velocity_filtered(1);
-	    // _msgVelTester.linear.z = hand_velocity_filtered(2);
-		// _msgVelTester.angular.x = _omegad[0];
-		// _msgVelTester.angular.y = _omegad[1];
-		// _msgVelTester.angular.z = _omegad[2];
-
-		// _pubVelTester.publish(_msgVelTester);
 
 
     	 if(currentTime-checkTime>=lookTW){
@@ -1125,85 +1190,62 @@ int main(int argc, char **argv)
 
     		
 
-    		currentVel2=compHandRelVel();
-    		//std::cout<<"current vel: " << currentVel[0] << ", " << currentVel[1] << ", " << currentVel[2] << " sp: " << std::sqrt(currentVel[0]*currentVel[0]+currentVel[1]*currentVel[1]+currentVel[2]*currentVel[2]) << "\n"; 
+    	currentVel2=compHandRelVel();
+    	//std::cout<<"current vel: " << currentVel[0] << ", " << currentVel[1] << ", " << currentVel[2] << " sp: " << std::sqrt(currentVel[0]*currentVel[0]+currentVel[1]*currentVel[1]+currentVel[2]*currentVel[2]) << "\n"; 
     		
     		
 
 
-    		desiredVel=compDesiredVel(currentVel);
+    	desiredVel=compDesiredVel(currentVel);
 
-    		computeDesiredOrientation();
+    	computeDesiredOrientation();
 
-    		speedMsg.sPer=speedPer;
-    		speedMsg.dir=handDirection;
+    	speedMsg.sPer=speedPer;
+    	speedMsg.dir=handDirection;
 
-    		_msgEeSpeedTester.sPer=ee_speed;
-    		_msgEeSpeedTester.dir=handDirection;
-
-
+    	_msgEeSpeedTester.sPer=ee_speed;
+    	_msgEeSpeedTester.dir=handDirection;
 
 
+		_msgDesiredTwist.angular.x = _omegad[0];
+		_msgDesiredTwist.angular.y = _omegad[1];
+		_msgDesiredTwist.angular.z = _omegad[2];
 
-   //  		_msgDesiredTwist.linear.x  = -currentVel2[0];
-			// _msgDesiredTwist.linear.y  = currentVel2[1];
-			// _msgDesiredTwist.linear.z  = currentVel2[2];
-			_msgDesiredTwist.angular.x = _omegad[0];
-			_msgDesiredTwist.angular.y = _omegad[1];
-			_msgDesiredTwist.angular.z = _omegad[2];
+		_msgDesiredTwist.linear.x  = desiredVel[0];
+		_msgDesiredTwist.linear.y  = desiredVel[1];
+		_msgDesiredTwist.linear.z  = desiredVel[2];
 
-			_msgDesiredTwist.linear.x  = desiredVel[0];
-			_msgDesiredTwist.linear.y  = desiredVel[1];
-			_msgDesiredTwist.linear.z  = desiredVel[2];
-			// _msgDesiredTwist.angular.x = _omegad[0];
-			// _msgDesiredTwist.angular.y = _omegad[1];
-			// _msgDesiredTwist.angular.z = _omegad[2];
+		_pubDesiredTwist.publish(_msgDesiredTwist);
 
-			_pubDesiredTwist.publish(_msgDesiredTwist);
+		// Publish desired orientation
+		_msgDesiredOrientation.w = _qd(0);
+		_msgDesiredOrientation.x = _qd(1);
+		_msgDesiredOrientation.y = _qd(2);
+		_msgDesiredOrientation.z = _qd(3);
 
-			// Publish desired orientation
-			_msgDesiredOrientation.w = _qd(0);
-			_msgDesiredOrientation.x = _qd(1);
-			_msgDesiredOrientation.y = _qd(2);
-			_msgDesiredOrientation.z = _qd(3);
+		_pubDesiredOrientation.publish(_msgDesiredOrientation);
 
-			_pubDesiredOrientation.publish(_msgDesiredOrientation);
+		_pubSpeedPer.publish(speedMsg);
+		_pubSpeedTester.publish(_msgEeSpeedTester);
 
-			_pubSpeedPer.publish(speedMsg);
-			_pubSpeedTester.publish(_msgEeSpeedTester);
+		_msgVelTester.linear.x = currentVel2[0];
+    	_msgVelTester.linear.y = currentVel2[1];
+	    _msgVelTester.linear.z = currentVel2[2];
+		_msgVelTester.angular.x = _omegad[0];
+		_msgVelTester.angular.y = _omegad[1];
+		_msgVelTester.angular.z = _omegad[2];
 
-
-			// _msgVelTester.linear.x = hand_velocity_filtered(0);
-   //  		_msgVelTester.linear.y = hand_velocity_filtered(1);
-	  //   	_msgVelTester.linear.z = hand_velocity_filtered(2);
-			// currentVel2=compHandRelVel();
-			_msgVelTester.linear.x = currentVel2[0];
-    		_msgVelTester.linear.y = currentVel2[1];
-	    	_msgVelTester.linear.z = currentVel2[2];
-			_msgVelTester.angular.x = _omegad[0];
-			_msgVelTester.angular.y = _omegad[1];
-			_msgVelTester.angular.z = _omegad[2];
-
-			_pubVelTester.publish(_msgVelTester);
+		_pubVelTester.publish(_msgVelTester);
 	    	
+   		
+
+    	if(saveData){
+    		if(saveData2File(_outputFile,currentTime,_eePosition,_q,ee_speed,desiredVel,handDirection,tmpHandRP,curr_hand_rev_position_filtered,cuur_hand_rev_velocity_filtered,hand_velocity_filtered,tmpElbowRP,elbow_revPosition_filtered,elbow_revPvelocity)<1){
+    			std::cout<<"The data are not stored properly\n";
+    		}
+    	}
 
     		
-    		
-
-    	// }
-
-
-    	// std::cout<<"--------------------------------------------------------------------\n";
-
-    	// std::cout<<"hand postion: (" << handPosition[0] << ", " << handPosition[1] << ", " << handPosition[2] <<")\n";
-    	// std::cout<<"hand orientation: (" << handOrientation[0] << ", " << handOrientation[1] << ", " << handOrientation[2] << ", " << handOrientation[3] <<")\n";
-
-
-     //    std::cout<<"elbow postion: (" << elbowPosition[0] << ", " << elbowPosition[1] << ", " << elbowPosition[2] <<")\n";
-    	// std::cout<<"elbow orientation: (" << elbowOrientation[0] << ", " << elbowOrientation[1] << ", " << elbowOrientation[2] << ", " << elbowOrientation[3] <<")\n";
-
-    	// std::cout<<"shoulder postion: (" << shoulderPosition[0] << ", " << shoulderPosition[1] << ", " << shoulderPosition[2] <<")\n";
-    	// std::cout<<"shoulder orientation: (" << shoulderOrientation[0] << ", " << shoulderOrientation[1] << ", " << shoulderOrientation[2] << ", " << shoulderOrientation[3] <<")\n";
 
 
 
@@ -1212,6 +1254,8 @@ int main(int argc, char **argv)
 
         loop_rate.sleep();
         ++count;
+    	
+    
     }
 
 
@@ -1235,6 +1279,8 @@ int main(int argc, char **argv)
 	ros::spinOnce();
 
 	loop_rate.sleep();
+
+	_outputFile.close();
 
     return 0;
 }
