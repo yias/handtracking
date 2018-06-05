@@ -878,11 +878,11 @@ int saveData2File(std::ofstream& optF,double ctTime,Eigen::VectorXd _eePos,Eigen
 		optF << eRP_filtered(0) << " " << eRP_filtered(1) << " " << eRP_filtered(2) << " ";
 		optF << elbow_revVel(0) << " " << elbow_revVel(1) << " " << elbow_revVel(2) << " ";
 		optF << rawHandPosition(0) << " " << rawHandPosition(1) << " " << rawHandPosition(2) << " ";
-		optF << rawHandOrientation(0) << " " << rawHandOrientation(1) << " " << rawHandOrientation(2) << " ";
+		optF << rawHandOrientation(0) << " " << rawHandOrientation(1) << " " << rawHandOrientation(2) << " " << rawHandOrientation(3) << " ";
 		optF << rawElbowPosition(0) << " " << rawElbowPosition(1) << " " << rawElbowPosition(2) << " ";
-		optF << rawElbowOrientation(0) << " " << rawElbowOrientation(1) << " " << rawElbowOrientation(2) << " ";
+		optF << rawElbowOrientation(0) << " " << rawElbowOrientation(1) << " " << rawElbowOrientation(2) << " " << rawElbowOrientation(3) << " ";
 		optF << rawShoulderPosition(0) << " " << rawShoulderPosition(1) << " " << rawShoulderPosition(2) << " ";
-		optF << rawShoulderOrientation(0) << " " << rawShoulderOrientation(1) << " " << rawShoulderOrientation(2);
+		optF << rawShoulderOrientation(0) << " " << rawShoulderOrientation(1) << " " << rawShoulderOrientation(2) << " "  << rawShoulderOrientation(3);
 		optF << std::endl;	
 		return 1;
 	}else{
