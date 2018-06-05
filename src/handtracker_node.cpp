@@ -32,6 +32,8 @@
 #include <iostream>
 #include <fstream>
 #include "Utils.h"
+#include "sg_filter.h"
+
 
 
 
@@ -77,8 +79,8 @@ bool initOK=false;
 int mocapRate=120;                                              // the sample rate of the motion capture system
 
 
-double a=0.9;													// smoothing factor for the velocity
-double a2=0.1;													// smoothing factor for the position
+// double a=0.9;													// smoothing factor for the velocity
+// double a2=0.1;													// smoothing factor for the position
 
 
 
@@ -97,6 +99,7 @@ MathLib::Vector robot_base_position_filtered_mathlib;
 MathLib::Vector robot_base_velocity_filted_mathlib;
 
 CDDynamics *robot_base_pos_filter;								// the filter for the robot-base position
+
 
 
 // ----------------- variables for the object -----------------
@@ -148,7 +151,7 @@ Eigen::VectorXd prev_hand_position(3);
 
 Eigen::VectorXd curr_hand_rev_position_filtered(3);
 
-Eigen::VectorXd cuur_hand_rev_velocity_filtered(3);
+Eigen::VectorXd hand_rel_velocity(3);
 
 Eigen::VectorXd prev_hand_real_velocity(3);
 
@@ -161,6 +164,20 @@ MathLib::Vector hand_rel_acceleration_mathlib;				// helper variable for the fin
 
 
 bool _firstHandRP=false;
+
+int sg_filter_order;		// sg filter order
+int sg_filter_wnlen;		// sg filter window length in samples
+double dim;					// dimension of the sg filter
+double samplingRate;
+
+SGF::SavitzkyGolayFilter sg_pos_filter;			// sg filter for the position of the hand
+SGF::SavitzkyGolayFilter sg_vel_filter;			// sg filter for the velocity of the hand
+
+Eigen::VectorXd hand_rel_position_sgfilt(3);
+Eigen::VectorXd hand_rel_velocity_sgfilt(3);
+
+double inputData_pos, inputData_vel;
+
 
 //------------------------------------------------------------------------------------------------------------------------------------------------------------------------//
 
@@ -659,6 +676,8 @@ Eigen::Vector3d handRP(Eigen::Vector3d handPos, Eigen::Vector3d shoulderPos){
 
 	Eigen::Vector3d hrp;				// the relative velocity of the hand
 
+	double speed=0;
+
 	hrp(0)=handPos(0)-shoulderPos(0);
 	hrp(1)=handPos(1)-shoulderPos(1);
 	hrp(2)=handPos(2)-shoulderPos(2);
@@ -679,8 +698,28 @@ Eigen::Vector3d handRP(Eigen::Vector3d handPos, Eigen::Vector3d shoulderPos){
 		hand_pos_filter->SetTarget(E2M_v(hrp));	
 		hand_pos_filter->Update();
 		hand_pos_filter->GetState(hand_position_filtered_mathlib, hand_real_velocity_mathlib);
-		cuur_hand_rev_velocity_filtered = M2E_v(hand_real_velocity_mathlib);
+		hand_rel_velocity = M2E_v(hand_real_velocity_mathlib);
 		curr_hand_rev_position_filtered=M2E_v(hand_position_filtered_mathlib);
+
+
+		// apply the savitzky-golay 
+
+
+
+		speed=hand_rel_velocity.norm();
+
+		// map to the robot speed
+
+		ee_speed=Hand2RobotSpeed(speed);
+
+		if(speed>=velThreshold){
+
+			motionOn=true;
+		
+		}
+
+		speedPer=hand_rel_velocity.norm()/(hand_velUpperBound-0.2);
+
 
 	}
 
@@ -790,24 +829,20 @@ double Hand2RobotSpeed(double handspeed){
 std::vector<double> compHandRelVel(){
 
 	std::vector<double> curVel(3,0);
-	std::vector<double> desVel(3,0);				// the desired velocity of the hand
-
-	//ee_speed=0;
-	double speed=0;
 
 
-	// filtering the velocity
-	hand_real_vel_filter->SetTarget(E2M_v(cuur_hand_rev_velocity_filtered));
-	hand_real_vel_filter->Update();
-	hand_real_vel_filter->GetState(hand_rel_velocity_mathlib, hand_rel_acceleration_mathlib);
-	hand_velocity_filtered = M2E_v(hand_rel_velocity_mathlib);
+	// // filtering the velocity
+	// hand_real_vel_filter->SetTarget(E2M_v(cuur_hand_rev_velocity_filtered));
+	// hand_real_vel_filter->Update();
+	// hand_real_vel_filter->GetState(hand_rel_velocity_mathlib, hand_rel_acceleration_mathlib);
+	// hand_velocity_filtered = M2E_v(hand_rel_velocity_mathlib);
 
-	curVel[0]=hand_rel_velocity_mathlib(0);
-	curVel[1]=hand_rel_velocity_mathlib(1);
-	curVel[2]=hand_rel_velocity_mathlib(2);
+	curVel[0]=hand_rev_velocity_filtered(0);
+	curVel[1]=hand_rev_velocity_filtered(1);
+	curVel[2]=hand_rev_velocity_filtered(2);
 
 
-	speed=std::sqrt(curVel[0]*curVel[0]+curVel[1]*curVel[1]+curVel[2]*curVel[2]);
+	double speed=std::sqrt(curVel[0]*curVel[0]+curVel[1]*curVel[1]+curVel[2]*curVel[2]);
 
 	// map to the robot speed
 
@@ -817,16 +852,7 @@ std::vector<double> compHandRelVel(){
 	if(speed>=velThreshold){
 
 		motionOn=true;
-		// desVel[0]=vel_gain*ee_speed*curVel[0]/speed;
-		// desVel[1]=vel_gain*ee_speed*curVel[1]/speed;
-		// desVel[2]=vel_gain*ee_speed*curVel[2]/speed;
-
-
-
-	}else{
-		// desVel[0]=0.0;
-		// desVel[1]=0.0;
-		// desVel[2]=0.0;
+		
 	}
 
 
@@ -861,7 +887,7 @@ void computeLinearParameters_speed(){
 
 }
 
-int saveData2File(std::ofstream& optF,double ctTime,Eigen::VectorXd _eePos,Eigen::Vector4f _oriPose,float eeS, std::vector<double> dVel,float handDir,Eigen::Vector3d _handRP,Eigen::VectorXd handRP_filtered, Eigen::VectorXd _handRV, Eigen::VectorXd handRV_filtered,Eigen::Vector3d eRP,Eigen::Vector3d eRP_filtered,Eigen::Vector3d elbow_revVel, Eigen::Vector3d rawHandPosition, Eigen::Vector4d rawHandOrientation,Eigen::Vector3d rawElbowPosition, Eigen::Vector4d rawElbowOrientation,Eigen::Vector3d rawShoulderPosition, Eigen::Vector4d rawShoulderOrientation){
+int saveData2File(std::ofstream& optF,double ctTime,Eigen::VectorXd _eePos,Eigen::Vector4f _oriPose,float eeS, std::vector<double> dVel,float handDir,Eigen::Vector3d _handRP,Eigen::VectorXd handRP_filtered, Eigen::VectorXd _handRV, Eigen::Vector3d eRP,Eigen::Vector3d eRP_filtered,Eigen::Vector3d elbow_revVel, Eigen::Vector3d rawHandPosition, Eigen::Vector4d rawHandOrientation,Eigen::Vector3d rawElbowPosition, Eigen::Vector4d rawElbowOrientation,Eigen::Vector3d rawShoulderPosition, Eigen::Vector4d rawShoulderOrientation){
 
 	if (optF.is_open()){
 		optF << ctTime << " ";
@@ -873,7 +899,7 @@ int saveData2File(std::ofstream& optF,double ctTime,Eigen::VectorXd _eePos,Eigen
 		optF << _handRP(0) << " " << _handRP(1) << " " << _handRP(2) <<  " ";
 		optF << handRP_filtered(0) << " " << handRP_filtered(1) << " " << handRP_filtered(2) << " ";
 		optF << _handRV(0) << " " << _handRV(1) << " " << _handRV(2) <<  " ";
-		optF << handRV_filtered(0) << " " << handRV_filtered(1) << " " << handRV_filtered(2) << " ";
+		// optF << handRV_filtered(0) << " " << handRV_filtered(1) << " " << handRV_filtered(2) << " ";
 		optF << eRP(0) << " " << eRP(1) << " " << eRP(2) << " ";
 		optF << eRP_filtered(0) << " " << eRP_filtered(1) << " " << eRP_filtered(2) << " ";
 		optF << elbow_revVel(0) << " " << elbow_revVel(1) << " " << elbow_revVel(2) << " ";
@@ -986,7 +1012,7 @@ int main(int argc, char **argv)
 
 	// filter parameters
 
-	double wn_filter_position, wn_filter_velocity, wn_filter_c, dt, dim,sample_time;
+	double wn_filter_position, wn_filter_velocity, wn_filter_c, dt,sample_time;
     wn_filter_position = 10.0;
     wn_filter_velocity = 200.0;//30
 	wn_filter_c = 25.0;
@@ -1005,6 +1031,9 @@ int main(int argc, char **argv)
 	hand_pos_filter->SetStateTarget(E2M_v(initHandPos), E2M_v(initHandPos));
 
 	hand_real_vel_filter->SetStateTarget(E2M_v(prev_hand_real_velocity), E2M_v(prev_hand_real_velocity));
+
+	sg_pos_filter=new SGF::SavitzkyGolayFilter();			
+	sg_vel_filter=new SGF::SavitzkyGolayFilter();		
 
 
 	// elbow filters
@@ -1033,6 +1062,8 @@ int main(int argc, char **argv)
 	object_orientation_filter->SetStateTarget(E2M_v(object_orientation), E2M_v(object_orientation));
 
 
+	
+		
 
 
 
@@ -1098,7 +1129,7 @@ int main(int argc, char **argv)
 
     		
 
-    	currHandVel=compHandRelVel();    		
+    	// currHandVel=hand_rel_velocity;    		
     		
 
 
@@ -1134,9 +1165,9 @@ int main(int argc, char **argv)
 		_pubSpeedPer.publish(speedMsg);
 		_pubSpeedTester.publish(_msgEeSpeedTester);
 
-		_msgVelTester.linear.x = currHandVel[0];
-    	_msgVelTester.linear.y = currHandVel[1];
-	    _msgVelTester.linear.z = currHandVel[2];
+		_msgVelTester.linear.x = hand_rel_velocity(0);
+    	_msgVelTester.linear.y = hand_rel_velocity(1);
+	    _msgVelTester.linear.z = hand_rel_velocity(2);
 		_msgVelTester.angular.x = _omegad[0];
 		_msgVelTester.angular.y = _omegad[1];
 		_msgVelTester.angular.z = _omegad[2];
@@ -1146,7 +1177,7 @@ int main(int argc, char **argv)
    		
 
     	if(saveData){
-    		if(saveData2File(_outputFile,currentTime,_eePosition,_q,ee_speed,desiredVel,handDirection,tmpHandRP,curr_hand_rev_position_filtered,cuur_hand_rev_velocity_filtered,hand_velocity_filtered,tmpElbowRP,elbow_revPosition_filtered,elbow_revPvelocity,handPosition,handOrientation,elbowPosition,elbowOrientation,shoulderPosition,shoulderOrientation)<1){
+    		if(saveData2File(_outputFile,currentTime,_eePosition,_q,ee_speed,desiredVel,handDirection,tmpHandRP,curr_hand_rev_position_filtered,hand_rel_velocity,tmpElbowRP,elbow_revPosition_filtered,elbow_revPvelocity,handPosition,handOrientation,elbowPosition,elbowOrientation,shoulderPosition,shoulderOrientation)<1){
     			std::cout<<"The data are not stored properly\n";
     		}
     	}
